@@ -19,28 +19,8 @@ services:
         condition: service_healthy
     networks:
       - saas_core_network
-    environment:
-      # Base de datos CENTRAL (donde viven los tenants)
-      - DB_HOST=mysql
-      - DB_PORT=3306
-      - DB_DATABASE=saas_central
-      - DB_USERNAME=admin
-      - DB_PASSWORD=password
-      
-      # Configuración de Tenancy
-      - TENANCY_DATABASE_AUTO_CREATE=true
-      - TENANCY_DATABASE_AUTO_DELETE=true
-      - CENTRAL_DOMAINS=localhost,admin.localhost
-      
-      # Redis
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      
-      # Xdebug
-      - XDEBUG_MODE=debug,develop
-      
-      # APP URL base para generación de URLs
-      - APP_URL=http://localhost:8075
+    env_file:
+      - .env
     healthcheck:
       test: ["CMD-SHELL", "php-fpm-healthcheck || exit 1"]
       interval: 10s
@@ -124,7 +104,7 @@ services:
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: root123
-      MYSQL_DATABASE: app_stream
+      MYSQL_DATABASE: saas_central
       MYSQL_USER: admin
       MYSQL_PASSWORD: password
       MYSQL_ALLOW_EMPTY_PASSWORD: "no"
