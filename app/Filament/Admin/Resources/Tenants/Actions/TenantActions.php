@@ -3,6 +3,7 @@
 namespace App\Filament\Admin\Resources\Tenants\Actions;
 
 use App\Enums\TenantStatus;
+use App\Filament\Admin\Resources\Tenants\TenantResource;
 use App\Models\Tenant;
 use App\Models\User;
 use Filament\Actions\Action;
@@ -54,7 +55,12 @@ class TenantActions
                 activity('auth')
                     ->performedOn($record)
                     ->event('impersonated')
-                    ->withProperties(['user_id' => $userId, 'token_hash' => hash('sha256', $token->token)])
+                    ->withProperties([
+                        'user_id' => $userId,
+                        'token_hash' => hash('sha256', $token->token),
+                        // A dónde vuelve el botón "Volver al panel central" de la barra del tenant
+                        'return_url' => TenantResource::getUrl('edit', ['record' => $record]),
+                    ])
                     ->log('Ingreso al panel del tenant como administrador');
 
                 $action->redirect($record->url('impersonate/'.$token->token));

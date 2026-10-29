@@ -140,7 +140,7 @@ Solo super admins (guard `admin`). Recurso **Tenants**:
 |---|---|
 | **Crear** | Valida nombre, slug (`^[a-z][a-z0-9-]*$`, máx. 40, único, y que no exista ya la BD `tenant_{slug}`), dominios (únicos, no centrales) y datos del admin. `Tenant::create()` dispara el pipeline de stancl: `CreateDatabase` → `MigrateDatabase` → `SeedDatabase` (`TenantDatabaseSeeder`). Luego crea el `User` admin con rol Administrador. Si eso falla, borra el tenant y su BD. Sin dominios, crea uno igual al slug. La página **no usa transacción** porque `CREATE DATABASE` hace commit implícito. |
 | **Editar** | Nombre y dominios. El slug no se puede cambiar. |
-| **Entrar como admin** | Genera un token de impersonación (stancl `UserImpersonation`, 60 s, un solo uso) para el Administrador más antiguo del tenant y redirige a `{tenant}/impersonate/{token}`, que hace login en el guard `web` y redirige a `/app`. Solo existe en el panel central. |
+| **Entrar como admin** | Genera un token de impersonación (stancl `UserImpersonation`, 60 s, un solo uso) para el Administrador más antiguo del tenant y redirige a `{tenant}/impersonate/{token}`, que hace login en el guard `web` y redirige a `/app`. Solo existe en el panel central. Mientras dura, el panel del tenant muestra una **barra fija** ("Estás en X como Y, ingresaste desde el panel central como Z") con el botón **Volver al panel central**: cierra la sesión del tenant y redirige a la ficha del tenant en `/admin`, cuya sesión sigue abierta (otra cookie, otro dominio). |
 | **Abrir login** | Abre `/app/login` del tenant en otra pestaña. |
 | **Suspender / Reactivar** | Cambia `status`. Suspendido → 403 en panel, rutas y API. Datos intactos. |
 | **Eliminar** | Confirmación Sí/No. `status = deleted`: sin acceso, BD conservada. Reversible con **Restaurar**. |
@@ -223,7 +223,8 @@ spatie/laravel-activitylog. Cada registro se guarda en la tabla `activity_log` *
 | `role` | Tenant | Alta/cambios/baja de roles y cambios de permisos (agregados/quitados) | `LogsActivity` en `Role` + `Role::syncPermissions()` |
 | `customer` | Tenant | Alta/cambios/baja de clientes (nombre, email, teléfono, activo) | `LogsActivity` en `Customer` |
 
-- **Impersonación**: el panel central registra qué super admin entró y guarda el hash del token. Al consumir el token, el tenant busca ese registro en la BD central y deja un "Acceso desde el panel central" cuyo `causer` es el `Admin`. Ese acceso no se registra como login del usuario suplantado.
+- **Impersonación**: el panel central registra qué super admin entró, el hash del token y la URL de regreso. Al consumir el token ([ImpersonationController](app/Http/Controllers/ImpersonationController.php)), el tenant busca ese registro en la BD central, deja un "Acceso desde el panel central" cuyo `causer` es el `Admin` y guarda en la sesión (`impersonation`) quién es y a dónde volver; de ahí sale la barra (hook `BODY_START` en `AppPanelProvider`, vista `resources/views/filament/app/impersonation-banner.blade.php`). Al salir —botón de la barra o "Cerrar sesión" de Filament— el listener de `Logout` registra "Fin del acceso desde el panel central", también a nombre del `Admin`. Ni la entrada ni la salida cuentan como login/logout del usuario suplantado.
+- **Paquetes de impersonación evaluados** (`stechstudio/filament-impersonate`, `lab404/laravel-impersonate`): no sirven aquí; suplantan dentro de la misma app, sesión y BD, y este caso cruza BD, guard, dominio y cookie.
 - **Pantallas**: "Auditoría" en ambos paneles (`/admin/auditoria`, `/app/auditoria`), solo lectura, con filtros por módulo, evento y fechas, y detalle con valores antes/después. En el tenant requiere `ViewAny:Activity` (por defecto solo el Administrador); en el central la ven todos los super admins ([ActivityPolicy](app/Policies/ActivityPolicy.php)).
 - **Retención**: `config/activitylog.php` → `clean_after_days` (365). La limpieza (`activitylog:clean`) aún no está programada (ver pendientes).
 
@@ -390,6 +391,7 @@ Definir en `.env` `APP_PORT`, `DB_FORWARD_PORT`, `REDIS_FORWARD_PORT` o `VITE_PO
 | `TenantPermissionsTest` | Roles base, Administrador, Validador, anti-escalada del Colaborador, roles personalizados, cache de permisos por tenant |
 | `CustomerApiTest` | Login/me/logout, credenciales inválidas, aislamiento de tokens, revocación, tenant inactivo, rate limit |
 | `AuditTest` | Auditoría central del ciclo de vida, impersonación en ambas BD, acciones del tenant (usuarios, roles, permisos, clientes), logins, permiso de la pantalla, contexto de logs |
+| `ImpersonationBannerTest` | Barra visible solo al entrar desde el panel central, "Volver al panel central" (redirección, cierre de sesión, auditoría), logout de Filament auditado como fin del acceso |
 | `AvatarTest` | Subida real por HTTP a la ruta de Livewire con sesión, subida desde el perfil a la carpeta del tenant, URL `/media`, aislamiento entre tenants y path traversal, tipos rechazados, borrado de archivos y de la carpeta al destruir |
 
 ## 7. Convenciones y trampas conocidas

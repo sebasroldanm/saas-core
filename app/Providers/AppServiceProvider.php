@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Http\Controllers\ImpersonationController;
+use App\Models\Admin;
 use App\Models\User;
 use App\Policies\ActivityPolicy;
 use Illuminate\Auth\Events\Failed;
@@ -89,14 +91,30 @@ class AppServiceProvider extends ServiceProvider
         });
 
         Event::listen(function (Logout $event): void {
-            if ($event->user instanceof Model) {
-                activity('auth')
-                    ->causedBy($event->user)
-                    ->performedOn($event->user)
-                    ->event('logout')
-                    ->withProperties(['guard' => $event->guard, 'ip' => request()->ip()])
-                    ->log('Cierre de sesión');
+            if (! $event->user instanceof Model) {
+                return;
             }
+
+            // Cierre de un acceso desde el panel central: se atribuye al super admin
+            $impersonation = request()->hasSession() ? session(ImpersonationController::SESSION_KEY) : null;
+
+            if ($impersonation && $event->guard === 'web') {
+                activity('auth')
+                    ->causedBy($impersonation['admin_id'] ? Admin::find($impersonation['admin_id']) : null)
+                    ->performedOn($event->user)
+                    ->event('impersonation_ended')
+                    ->withProperties(['ip' => request()->ip()])
+                    ->log('Fin del acceso desde el panel central');
+
+                return;
+            }
+
+            activity('auth')
+                ->causedBy($event->user)
+                ->performedOn($event->user)
+                ->event('logout')
+                ->withProperties(['guard' => $event->guard, 'ip' => request()->ip()])
+                ->log('Cierre de sesión');
         });
 
         Event::listen(function (Failed $event): void {

@@ -3,6 +3,7 @@
 namespace App\Providers\Filament;
 
 use App\Filament\App\Pages\Auth\EditProfile;
+use App\Http\Controllers\ImpersonationController;
 use App\Http\Middleware\EnsureTenantIsActive;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use Filament\Http\Middleware\Authenticate;
@@ -13,6 +14,7 @@ use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
+use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Filament\Widgets\FilamentInfoWidget;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -35,6 +37,15 @@ class AppPanelProvider extends PanelProvider
             ->login()
             ->profile(EditProfile::class, isSimple: false)
             ->authGuard('web')
+            // Barra fija mientras un super admin está dentro del tenant ("Entrar como admin")
+            ->renderHook(
+                PanelsRenderHook::BODY_START,
+                fn (): string => session()->has(ImpersonationController::SESSION_KEY)
+                    ? view('filament.app.impersonation-banner', [
+                        'impersonation' => session(ImpersonationController::SESSION_KEY),
+                    ])->render()
+                    : '',
+            )
             ->colors([
                 'primary' => Color::Amber,
             ])

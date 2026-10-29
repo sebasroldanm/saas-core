@@ -36,6 +36,7 @@ class Audit
         'login_failed' => 'Login fallido',
         'logout' => 'Cierre de sesión',
         'impersonated' => 'Acceso desde panel central',
+        'impersonation_ended' => 'Fin del acceso desde panel central',
         'roles_changed' => 'Roles modificados',
         'permissions_changed' => 'Permisos modificados',
     ];

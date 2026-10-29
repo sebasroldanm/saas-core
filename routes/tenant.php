@@ -31,6 +31,7 @@ Route::middleware([
 
     // Acceso del super admin generado desde el panel central (token de un solo uso, 60 s)
     Route::get('/impersonate/{token}', ImpersonationController::class)->name('tenant.impersonate');
+    Route::post('/impersonate/leave', [ImpersonationController::class, 'leave'])->name('tenant.impersonate.leave');
 });
 
 // Archivos públicos del tenant (avatares, etc.). Sin sesión ni CSRF: solo identifica el tenant
