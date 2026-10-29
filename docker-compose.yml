@@ -14,22 +14,8 @@ services:
     working_dir: /var/www/html
     volumes:
       - ./:/var/www/html
-    # Las variables reales del contenedor tienen prioridad sobre las del .env de Laravel
-    environment:
-      APP_NAME: core-saas
-      APP_URL: http://localhost:${APP_PORT:-8080}
-      DB_CONNECTION: mysql
-      DB_HOST: core-saas-db
-      DB_PORT: 3306
-      DB_DATABASE: ${DB_DATABASE:-core_saas}
-      DB_USERNAME: ${DB_USERNAME:-core_saas}
-      DB_PASSWORD: ${DB_PASSWORD:-secret}
-      REDIS_CLIENT: phpredis
-      REDIS_HOST: core-saas-redis
-      REDIS_PORT: 6379
-      CACHE_STORE: redis
-      SESSION_DRIVER: redis
-      QUEUE_CONNECTION: redis
+    # La configuración de Laravel sale solo del .env (no inyectar DB_*/CACHE_* aquí:
+    # las variables del contenedor pisarían las de phpunit.xml y los tests usarían la BD de desarrollo)
     depends_on:
       db:
         condition: service_healthy
