@@ -17,6 +17,13 @@ export default defineConfig({
         tailwindcss(),
     ],
     server: {
+        // Dentro de Docker: escuchar en todas las interfaces y que el navegador conecte vía localhost
+        host: '0.0.0.0',
+        port: 5173,
+        strictPort: true,
+        hmr: {
+            host: 'localhost',
+        },
         watch: {
             ignored: ['**/storage/framework/views/**'],
         },

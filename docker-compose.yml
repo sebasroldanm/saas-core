@@ -63,8 +63,13 @@ services:
       MYSQL_USER: ${DB_USERNAME:-core_saas}
       MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+      # Prefijo de las BD de tenants sobre las que el usuario de la app tiene permisos (ver docker/mysql/init)
+      TENANT_DB_PREFIX: ${TENANT_DB_PREFIX:-tenant_}
+    # Datos persistidos en disco del host (bind mount), sobreviven a `down -v` y a recrear el contenedor
     volumes:
-      - core-saas-db-data:/var/lib/mysql
+      - ${DB_DATA_PATH:-./docker/data/mysql}:/var/lib/mysql
+      # Solo se ejecuta cuando el directorio de datos está vacío (primera inicialización)
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DB_ROOT_PASSWORD:-root}"]
       interval: 10s
@@ -80,8 +85,9 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "${REDIS_FORWARD_PORT:-6379}:6379"
+    # Datos persistidos en disco del host (bind mount), igual que la BD
     volumes:
-      - core-saas-redis-data:/data
+      - ${REDIS_DATA_PATH:-./docker/data/redis}:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -90,13 +96,22 @@ services:
     networks:
       - core-saas-network
 
+  node:
+    image: node:26-alpine
+    container_name: core-saas-node
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /var/www/html
+    # Instala dependencias y levanta Vite en modo dev (HMR). Para compilar: docker compose exec node npm run build
+    command: ["sh", "-c", "npm install && npm run dev"]
+    ports:
+      - "${VITE_PORT:-5173}:5173"
+    volumes:
+      - ./:/var/www/html
+    networks:
+      - core-saas-network
+
 networks:
   core-saas-network:
     name: core-saas-network
     driver: bridge
-
-volumes:
-  core-saas-db-data:
-    name: core-saas-db-data
-  core-saas-redis-data:
-    name: core-saas-redis-data
