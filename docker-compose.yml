@@ -43,7 +43,7 @@ services:
     container_name: core-saas-db
     restart: unless-stopped
     ports:
-      - "${DB_FORWARD_PORT:-3306}:3306"
+      - "${DB_FORWARD_PORT:-33061}:3306"
     environment:
       MYSQL_DATABASE: ${DB_DATABASE:-core_saas}
       MYSQL_USER: ${DB_USERNAME:-core_saas}
@@ -70,7 +70,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${REDIS_FORWARD_PORT:-6379}:6379"
+      - "${REDIS_FORWARD_PORT:-63791}:6379"
     # Datos persistidos en disco del host (bind mount), igual que la BD
     volumes:
       - ${REDIS_DATA_PATH:-./docker/data/redis}:/data

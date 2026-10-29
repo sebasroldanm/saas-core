@@ -31,7 +31,7 @@ class TenantActions
     }
 
     /**
-     * Entra al panel del tenant como su primer usuario (el admin creado con el tenant).
+     * Entra al panel del tenant como el Administrador más antiguo (normalmente el creado con el tenant).
      */
     public static function impersonate(): Action
     {
@@ -41,10 +41,10 @@ class TenantActions
             ->color('primary')
             ->visible(fn (Tenant $record): bool => $record->isActive())
             ->action(function (Tenant $record, Action $action): void {
-                $userId = $record->run(fn () => User::query()->orderBy('id')->value('id'));
+                $userId = $record->run(fn () => User::role(User::ADMIN_ROLE)->orderBy('id')->value('id'));
 
                 if (! $userId) {
-                    Notification::make()->title('El tenant no tiene usuarios.')->danger()->send();
+                    Notification::make()->title('El tenant no tiene usuarios con rol Administrador.')->danger()->send();
                     $action->halt();
                 }
 
