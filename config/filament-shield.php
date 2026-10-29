@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use App\Filament\App\Resources\Activities\ActivityResource;
 use BezhanSalleh\FilamentShield\Resources\Roles\RoleResource;
 use Filament\Pages\Dashboard;
 use Filament\Widgets\AccountWidget;
@@ -142,7 +143,7 @@ return [
 
     'policies' => [
         'path' => app_path('Policies'),
-        'merge' => true,
+        'merge' => false, // los recursos de 'resources.manage' usan solo sus métodos (p. ej. auditoría: ver)
         'generate' => true,
         // Solo las acciones que usan los recursos (sin soft deletes ni reordenamiento)
         'methods' => [
@@ -194,6 +195,11 @@ return [
                 'create',
                 'update',
                 'delete',
+            ],
+            // Auditoría del tenant: solo lectura
+            ActivityResource::class => [
+                'viewAny',
+                'view',
             ],
         ],
         'exclude' => [

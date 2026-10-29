@@ -37,7 +37,18 @@ trait InteractsWithTenantDestruction
                 // Solo se destruye lo que antes pasó por "Eliminar"
                 abort_unless($tenant->status === TenantStatus::Deleted, 403);
 
-                // stancl borra la BD del tenant en el evento TenantDeleted; dominios y tokens caen en cascada
+                activity('tenant')
+                    ->performedOn($tenant)
+                    ->event('destroyed')
+                    ->withProperties([
+                        'name' => $tenant->name,
+                        'database' => Tenant::databaseNameFor($tenant->id),
+                        'domains' => $tenant->domains()->pluck('domain')->all(),
+                    ])
+                    ->log('Tenant destruido: base de datos y archivos eliminados');
+
+                // stancl borra la BD (y DeleteTenantStorage sus archivos) en el evento TenantDeleted;
+                // dominios y tokens caen en cascada
                 $tenant->delete();
 
                 Notification::make()->title('Tenant destruido')->success()->send();

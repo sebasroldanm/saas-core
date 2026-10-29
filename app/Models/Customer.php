@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Support\Audit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Laravel\Sanctum\HasApiTokens;
+use Spatie\Activitylog\Models\Concerns\LogsActivity;
+use Spatie\Activitylog\Support\LogOptions;
 
 /**
  * Cliente de un tenant (BD del tenant). No entra al panel: se autentica por la API con tokens.
@@ -14,7 +17,17 @@ use Laravel\Sanctum\HasApiTokens;
 #[Hidden(['password'])]
 class Customer extends Authenticatable
 {
-    use HasApiTokens;
+    use HasApiTokens, LogsActivity;
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->useLogName('customer')
+            ->logOnly(['name', 'email', 'phone', 'is_active'])
+            ->logOnlyDirty()
+            ->dontLogEmptyChanges()
+            ->setDescriptionForEvent(fn (string $event): string => Audit::modelDescription('Cliente', $event));
+    }
 
     protected static function booted(): void
     {

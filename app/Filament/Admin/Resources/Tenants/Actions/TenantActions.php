@@ -50,6 +50,13 @@ class TenantActions
 
                 $token = tenancy()->impersonate($record, (string) $userId, '/app', 'web');
 
+                // El tenant busca este registro por el hash del token para saber qué super admin entró
+                activity('auth')
+                    ->performedOn($record)
+                    ->event('impersonated')
+                    ->withProperties(['user_id' => $userId, 'token_hash' => hash('sha256', $token->token)])
+                    ->log('Ingreso al panel del tenant como administrador');
+
                 $action->redirect($record->url('impersonate/'.$token->token));
             });
     }

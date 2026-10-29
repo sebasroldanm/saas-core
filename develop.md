@@ -28,6 +28,7 @@ Para instalar el entorno desde cero ver [install.md](install.md).
 | spatie/laravel-permission | 8.3 | Roles y permisos de los usuarios del tenant |
 | bezhansalleh/filament-shield | 4.3 | Pantalla de roles y policies en Filament |
 | laravel/sanctum | 4.3 | Tokens de la API de customers |
+| spatie/laravel-activitylog | 5.1 | Auditoría (central y por tenant) |
 | MySQL | 9.7 LTS | BD central y de tenants |
 | Redis | 8.10 | Cache, sesiones y colas |
 | Node | 26 LTS | Vite / Tailwind 4 |
@@ -76,18 +77,22 @@ Al identificarlo, stancl cambia la conexión por defecto a la BD del tenant y a�
 | `tenants` | `id` (= slug), `name`, `status`, `status_changed_at`, `data` (JSON de stancl, sin uso por ahora) |
 | `domains` | Dominios/subdominios de cada tenant (FK con cascada) |
 | `tenant_user_impersonation_tokens` | Tokens de un solo uso de "Entrar como admin" |
+| `activity_log` | Auditoría del panel central. `subject_id` es texto (el id de un tenant es su slug) |
 | `sessions`, `cache`, `jobs`… | Tablas por defecto de Laravel (sesiones y cache están en Redis) |
 
 **Tenant (`tenant_{slug}`)** — migraciones en `database/migrations/tenant`:
 
 | Tabla | Contenido |
 |---|---|
-| `users`, `password_reset_tokens` | Usuarios del backoffice del tenant |
+| `users`, `password_reset_tokens` | Usuarios del backoffice del tenant (`users.avatar_path`: ruta del avatar) |
 | `roles`, `permissions`, `model_has_*`, `role_has_permissions` | spatie/permission |
 | `customers` | Clientes del tenant |
 | `personal_access_tokens` | Tokens Sanctum de los customers |
+| `activity_log` | Auditoría del tenant |
 
-**Tests**: BD central `core_saas_testing` y tenants con prefijo `tenant_test_` (definido en [phpunit.xml](phpunit.xml)).
+**Archivos**: cada tenant tiene su carpeta `storage/tenant_{slug}/` (ver [3.6](#36-archivos-y-avatares)).
+
+**Tests**: BD central `core_saas_testing`, tenants con BD y carpeta de storage `tenant_test_*` (prefijo `TENANT_DB_PREFIX` en [phpunit.xml](phpunit.xml)).
 
 **Permisos MySQL** ([docker/mysql/init/01-tenant-grants.sh](docker/mysql/init/01-tenant-grants.sh)): el usuario de la app tiene `ALL` sobre `core_saas`, `core_saas_testing` y `tenant\_%`, nada más. El script solo corre cuando `docker/data/mysql` está vacío.
 
@@ -96,9 +101,11 @@ Al identificarlo, stancl cambia la conexión por defecto a la BD del tenant y a�
 | Modelo | Conexión | Notas |
 |---|---|---|
 | `Admin` | Central (`CentralConnection`) | Sin roles. Acceso total al panel central. |
-| `Tenant` | Central | Extiende el de stancl. El id es el slug y **no se genera** (`getIncrementing() = false`). Helpers `url()`, `host()`, `changeStatus()`, `databaseNameFor()`. |
-| `User` | Por defecto (= tenant) | `HasRoles`. Constante `ADMIN_ROLE = 'Administrador'`. |
-| `Customer` | Por defecto (= tenant) | `HasApiTokens`. No entra al panel. |
+| `Tenant` | Central | Extiende el de stancl. El id es el slug y **no se genera** (`getIncrementing() = false`). Helpers `url()`, `host()`, `changeStatus()`, `databaseNameFor()`. Auditoría explícita (sin `LogsActivity`, ver [7](#7-convenciones-y-trampas-conocidas)). |
+| `Domain` | Central | Extiende el de stancl para auditar altas/bajas de dominios. |
+| `User` | Por defecto (= tenant) | `HasRoles`, `HasAvatar`, `LogsActivity`. Constante `ADMIN_ROLE = 'Administrador'`. |
+| `Customer` | Por defecto (= tenant) | `HasApiTokens`, `LogsActivity`. No entra al panel. |
+| `Role` | Por defecto (= tenant) | Extiende el de spatie (`config/permission.php`) para auditar el rol y sus cambios de permisos. |
 
 Regla: **modelos del tenant sin conexión explícita; modelos centrales con `CentralConnection`**.
 
@@ -107,11 +114,16 @@ Regla: **modelos del tenant sin conexión explícita; modelos centrales con `Cen
 | Ruta | Qué hay |
 |---|---|
 | `app/Filament/Admin/` | Panel central: recurso Tenants, acciones de ciclo de vida ([TenantActions.php](app/Filament/Admin/Resources/Tenants/Actions/TenantActions.php)), creación ([CreateTenant.php](app/Filament/Admin/Resources/Tenants/Pages/CreateTenant.php)), destrucción en dos pasos ([InteractsWithTenantDestruction.php](app/Filament/Admin/Resources/Tenants/Pages/Concerns/InteractsWithTenantDestruction.php)) |
-| `app/Filament/App/` | Panel del tenant: recursos Users y Customers (la pantalla de Roles la aporta Shield) |
+| `app/Filament/App/` | Panel del tenant: recursos Users, Customers y Auditoría; perfil ([EditProfile.php](app/Filament/App/Pages/Auth/EditProfile.php)). La pantalla de Roles la aporta Shield |
+| `app/Filament/Shared/` | Tabla y detalle de auditoría compartidos por los dos paneles |
 | `app/Providers/Filament/` | Configuración de los dos paneles |
-| [app/Providers/TenancyServiceProvider.php](app/Providers/TenancyServiceProvider.php) | Pipeline al crear/borrar tenants y aislamiento de la cache de permisos |
-| [app/Providers/AppServiceProvider.php](app/Providers/AppServiceProvider.php) | Bypass del rol Administrador (`Gate::before`) y rate limiter de la API |
+| [app/Providers/TenancyServiceProvider.php](app/Providers/TenancyServiceProvider.php) | Pipeline al crear/borrar tenants, cache de permisos por tenant, contexto de logs y URL del disco `public` |
+| [app/Providers/AppServiceProvider.php](app/Providers/AppServiceProvider.php) | Bypass del rol Administrador (`Gate::before`), policy de auditoría, auditoría de logins y rate limiter de la API |
 | [app/Support/RoleAssignment.php](app/Support/RoleAssignment.php) | Reglas anti-escalada de privilegios al asignar roles |
+| [app/Support/Audit.php](app/Support/Audit.php) | Etiquetas de auditoría (módulos, eventos, sujetos) y registro de cambios de roles |
+| [app/Http/Controllers/TenantMediaController.php](app/Http/Controllers/TenantMediaController.php) | Sirve los archivos públicos del tenant en `/media` |
+| [app/Http/Controllers/ImpersonationController.php](app/Http/Controllers/ImpersonationController.php) | Consume el token de "Entrar como admin" y lo audita en el tenant |
+| [app/Jobs/DeleteTenantStorage.php](app/Jobs/DeleteTenantStorage.php) | Borra la carpeta de archivos del tenant al destruirlo |
 | `app/Policies/` | Policies generadas por Shield (UserPolicy ajustada a mano) |
 | [app/Http/Middleware/EnsureTenantIsActive.php](app/Http/Middleware/EnsureTenantIsActive.php) | 403 si el tenant no está activo |
 | `app/Http/Controllers/Api/V1/` | API de customers |
@@ -142,13 +154,17 @@ Usuarios del backoffice (guard `web`, tabla `users` de la BD del tenant). Middle
 
 | Recurso | Funcionalidad |
 |---|---|
-| **Usuarios** | Listado, detalle, alta, edición y borrado con roles. Contraseña opcional en edición. |
+| **Usuarios** | Listado, detalle, alta, edición y borrado con roles y avatar. Contraseña opcional en edición. |
 | **Clientes** | Listado, detalle, alta, edición y borrado de customers (nombre, email, teléfono, contraseña, activo). |
 | **Roles** (Shield, grupo Administración) | Crear roles y marcar permisos por recurso. |
+| **Auditoría** (grupo Administración) | Solo lectura. Ver [3.5](#35-auditoría). |
+| **Perfil** (menú de usuario) | Cada usuario edita nombre, email, contraseña y avatar sin necesitar permisos sobre Usuarios. |
 
 ### 3.3 Roles y permisos
 
-- Permisos por recurso con formato `Acción:Modelo`: `ViewAny`, `View`, `Create`, `Update`, `Delete`, `DeleteAny` × `User`, `Customer`, `Role` (18 en total). Shield los deriva de los recursos del panel `app`; los métodos se limitan en `config/filament-shield.php` → `policies.methods`.
+- Permisos por recurso con formato `Acción:Modelo`, derivados por Shield de los recursos del panel `app` (19 en total):
+  - `User`, `Customer`: `ViewAny`, `View`, `Create`, `Update`, `Delete`, `DeleteAny` (métodos por defecto, `config/filament-shield.php` → `policies.methods`);
+  - `Role`: `ViewAny`, `View`, `Create`, `Update`, `Delete`; `Activity` (auditoría): `ViewAny`, `View` (definidos en `resources.manage`, con `policies.merge = false`).
 - Roles base que crea [TenantRolesSeeder](database/seeders/TenantRolesSeeder.php) (`BASE_ROLES`):
 
   | Rol | Permisos |
@@ -182,6 +198,8 @@ Base: `http://{slug}.localhost:8080/api/v1` (rutas en [routes/tenant.php](routes
 - Desactivar un customer o cambiarle la contraseña revoca todos sus tokens (`Customer::booted()`).
 - Tenant suspendido o eliminado → `403`. Dominio central → `404`.
 
+Los logins, logins fallidos y logouts de la API quedan en la auditoría del tenant (guard `customer`).
+
 Ejemplo:
 
 ```bash
@@ -192,6 +210,54 @@ curl -X POST http://acme.localhost:8080/api/v1/auth/login \
 curl http://acme.localhost:8080/api/v1/auth/me \
   -H "Accept: application/json" -H "Authorization: Bearer {token}"
 ```
+
+### 3.5 Auditoría
+
+spatie/laravel-activitylog. Cada registro se guarda en la tabla `activity_log` **de la BD del contexto actual**: lo que pasa en el panel central va a la central y lo que pasa en un tenant, a la BD de ese tenant. Quién lo hizo (`causer`) sale del guard activo; en un tenant puede ser un `User` o un `Admin` central (impersonación, alta del tenant).
+
+| Módulo (`log_name`) | Dónde | Qué se registra | Cómo |
+|---|---|---|---|
+| `tenant` | Central | Alta, cambio de nombre, cambio de estado (`Estado: Activo → Suspendido`), destrucción; alta/baja de dominios | Registros explícitos en `CreateTenant`, `EditTenant`, `Tenant::changeStatus()`, `confirmDestroy`; `LogsActivity` en `Domain` |
+| `auth` | Central y tenant | Login, login fallido (con email), logout de los paneles y de la API; "Entrar como admin" | Listeners `Login`/`Failed`/`Logout` en `AppServiceProvider`; `CustomerAuthController`; `TenantActions::impersonate` + `ImpersonationController` |
+| `user` | Tenant | Alta/cambios/baja de usuarios (nombre, email, avatar; **nunca la contraseña**) y cambios de roles (agregados/quitados) | `LogsActivity` en `User`; `Audit::rolesChanged()` en las páginas de usuario y en el alta del tenant |
+| `role` | Tenant | Alta/cambios/baja de roles y cambios de permisos (agregados/quitados) | `LogsActivity` en `Role` + `Role::syncPermissions()` |
+| `customer` | Tenant | Alta/cambios/baja de clientes (nombre, email, teléfono, activo) | `LogsActivity` en `Customer` |
+
+- **Impersonación**: el panel central registra qué super admin entró y guarda el hash del token. Al consumir el token, el tenant busca ese registro en la BD central y deja un "Acceso desde el panel central" cuyo `causer` es el `Admin`. Ese acceso no se registra como login del usuario suplantado.
+- **Pantallas**: "Auditoría" en ambos paneles (`/admin/auditoria`, `/app/auditoria`), solo lectura, con filtros por módulo, evento y fechas, y detalle con valores antes/después. En el tenant requiere `ViewAny:Activity` (por defecto solo el Administrador); en el central la ven todos los super admins ([ActivityPolicy](app/Policies/ActivityPolicy.php)).
+- **Retención**: `config/activitylog.php` → `clean_after_days` (365). La limpieza (`activitylog:clean`) aún no está programada (ver pendientes).
+
+### 3.6 Archivos y avatares
+
+**Dónde se guardan**: stancl (`FilesystemTenancyBootstrapper`) cambia la raíz de `storage_path()` y de los discos `local` y `public` mientras hay un tenant inicializado:
+
+| Disco | Central | Dentro del tenant `acme` |
+|---|---|---|
+| `local` | `storage/app/private` | `storage/tenant_acme/app/private/` |
+| `public` | `storage/app/public` | `storage/tenant_acme/app/public/` |
+| `livewire-tmp` | `storage/app/livewire-tmp` | igual (no se separa, ver abajo) |
+
+El código usa siempre `Storage::disk('public')` sin pensar en el tenant: la separación la hace la tenancy. El prefijo de carpeta es el mismo que el de la BD (`TENANT_DB_PREFIX`).
+
+**Cómo se sirven**: los archivos del tenant no están bajo `public/storage`, así que se sirven por la ruta `GET /media/{path}` del dominio del tenant ([TenantMediaController](app/Http/Controllers/TenantMediaController.php)): identifica el tenant, exige que esté activo, lee solo dentro de la raíz del disco `public` de ese tenant (bloquea `../`) y responde con `nosniff`. Al inicializar un tenant, `filesystems.disks.public.url` pasa a `http://{tenant}/media`, por eso `Storage::disk('public')->url($path)` devuelve la URL correcta (Filament la usa para mostrar imágenes). En el dominio central `/media` da 404.
+
+**Subidas de Livewire/Filament**: el archivo temporal se guarda en el disco `livewire-tmp` (raíz fija, común a todos) porque la ruta de subida de Livewire no inicializa la tenancy. Por el mismo motivo su rate limit (`throttle:livewire-upload`) no usa el usuario de la sesión. Al guardar el formulario —petición que sí tiene tenancy— Filament lo mueve al disco `public` del tenant.
+
+**Avatar del usuario**: campo [AvatarUpload](app/Filament/App/Resources/Users/Schemas/Components/AvatarUpload.php) en el formulario de usuarios y en el perfil. JPG, PNG o WebP (sin SVG, que puede tener scripts), máx. 2 MB, en `avatars/`. `User::getFilamentAvatarUrl()` lo muestra en el panel. Al reemplazarlo, quitarlo o borrar el usuario se elimina el archivo anterior.
+
+**Al destruir un tenant** se borra su carpeta `storage/tenant_{slug}` ([DeleteTenantStorage](app/Jobs/DeleteTenantStorage.php), después de borrar la BD).
+
+**Archivos privados** (documentos, adjuntos): usar el disco `local` (también separado por tenant) y servirlos con una ruta propia que verifique permisos, nunca por `/media`.
+
+### 3.7 Logs y errores con contexto de tenant
+
+Al inicializar un tenant se agrega `tenant` al [Context](https://laravel.com/docs/context) de Laravel y se quita al volver al contexto central. Laravel lo adjunta a cada línea de log y a los errores reportados, y lo propaga a los jobs encolados:
+
+```
+[2026-10-29 22:30:00] local.ERROR: fallo dentro del tenant {"exception":...} {"tenant":"acme"}
+```
+
+Si se integra Sentry o Flare (pendiente), reciben el mismo contexto.
 
 ## 4. Comandos frecuentes
 
@@ -227,6 +293,7 @@ alias art="docker compose exec backend php artisan"
 | `art optimize:clear` | Limpiar caches de config, rutas y vistas |
 | `art filament:assets` | Republicar los assets de Filament (tras actualizar Filament) |
 | `art tinker` | Consola. Dentro de un tenant: `tenancy()->initialize(App\Models\Tenant::find('acme'));` |
+| `art activitylog:clean` | Borra registros de auditoría más viejos que `clean_after_days` (BD central; en tenants: `art tenants:run activitylog:clean`) |
 
 ### Calidad
 
@@ -272,7 +339,9 @@ Ejemplo: `Product`, con datos en la BD de cada tenant.
    art tenants:seed --class="Database\Seeders\TenantRolesSeeder"
    ```
 6. Si algún rol base debe tener los permisos nuevos, agregarlos en `TenantRolesSeeder::BASE_ROLES`. **Solo aplica a tenants nuevos**: en los existentes los asigna el Administrador desde Roles (o una migración de datos si se quiere forzar).
-7. Labels en español (`$modelLabel`, `$pluralModelLabel`, `->label()`), tests en `tests/Feature` y actualizar este documento (secciones 3 y 8).
+7. Auditoría: agregar `LogsActivity` al modelo con `logOnly([...])` (nunca contraseñas ni tokens), `useLogName(...)` y `setDescriptionForEvent(fn ($e) => Audit::modelDescription('Producto', $e))`; registrar el módulo y el sujeto en [Audit](app/Support/Audit.php) (`LOGS`, `SUBJECTS`).
+8. Archivos: `Storage::disk('public')` para públicos (se sirven por `/media`), `Storage::disk('local')` para privados.
+9. Labels en español (`$modelLabel`, `$pluralModelLabel`, `->label()`), tests en `tests/Feature` y actualizar este documento (secciones 3 y 8).
 
 ### 5.2 Nuevo recurso en el panel central
 
@@ -320,6 +389,8 @@ Definir en `.env` `APP_PORT`, `DB_FORWARD_PORT`, `REDIS_FORWARD_PORT` o `VITE_PO
 | `TenantLifecycleTest` | Alta, validaciones, dominios, aislamiento de paneles, impersonación, suspender/eliminar/restaurar, destrucción en dos pasos |
 | `TenantPermissionsTest` | Roles base, Administrador, Validador, anti-escalada del Colaborador, roles personalizados, cache de permisos por tenant |
 | `CustomerApiTest` | Login/me/logout, credenciales inválidas, aislamiento de tokens, revocación, tenant inactivo, rate limit |
+| `AuditTest` | Auditoría central del ciclo de vida, impersonación en ambas BD, acciones del tenant (usuarios, roles, permisos, clientes), logins, permiso de la pantalla, contexto de logs |
+| `AvatarTest` | Subida real por HTTP a la ruta de Livewire con sesión, subida desde el perfil a la carpeta del tenant, URL `/media`, aislamiento entre tenants y path traversal, tipos rechazados, borrado de archivos y de la carpeta al destruir |
 
 ## 7. Convenciones y trampas conocidas
 
@@ -341,6 +412,12 @@ Definir en `.env` `APP_PORT`, `DB_FORWARD_PORT`, `REDIS_FORWARD_PORT` o `VITE_PO
 | URLs del panel central desde consola o jobs | El panel admin está en dos dominios: fuera de una petición HTTP hay que llamar `Filament::currentDomain('localhost')` antes de generar URLs (`LogicException` si no). |
 | Middlewares del panel de tenant | Deben ir con `isPersistent: true`; si no, las peticiones de Livewire (`/livewire-*/update`) se ejecutarían contra la BD central. |
 | `asset_helper_tenancy` | Está en `false`: los assets de Filament/Vite son compartidos. Activarlo rompe CSS/JS en los tenants. |
+| `LogsActivity` en `Tenant` | No usarlo: stancl asocia sus eventos (`TenantCreated`, `TenantDeleted`) a `created`/`deleted` y, como sus listeners devuelven valores, Laravel no dispara el evento Eloquent que usa el trait. La auditoría del tenant se registra explícitamente. |
+| Rutas globales sin tenancy | Las rutas que no identifican al tenant (subida y preview de Livewire, assets) **no deben resolver el usuario de la sesión**: lo buscarían en la BD central (`Table 'core_saas.users' doesn't exist`). Ej.: el `throttle` por defecto llama `$request->user()`; por eso la subida usa el limitador `livewire-upload` (host + IP, `AppServiceProvider`). |
+| Tenants existentes tras un pull | Si llegan migraciones o permisos nuevos de tenant, correr `art tenants:migrate` y `art tenants:seed --class="Database\Seeders\TenantRolesSeeder"`; si no, aparecen errores como `Table 'tenant_x.activity_log' doesn't exist`. |
+| Disco temporal de Livewire | Debe seguir siendo `livewire-tmp` (`config/livewire.php`): si fuera `local`, la subida (sin tenancy) y el guardado (con tenancy) usarían carpetas distintas. |
+| Shield `policies.merge` | En `false`: los recursos de `resources.manage` usan solo sus métodos. Si se pasa a `true`, la auditoría ganaría permisos de crear/editar sin sentido. |
+| Prefijo de tests | `TENANT_DB_PREFIX=tenant_test_` separa BD **y** carpetas de storage de los tests: no cambiarlo en `phpunit.xml`, o un test podría borrar archivos de un tenant de desarrollo. |
 | Orden de `central_domains` | El primero (`localhost`) es la base de los subdominios de tenants. |
 | `UID` en bash | Es una variable de solo lectura y no se exporta: Compose usa 1000 salvo que `UID`/`GID` estén en `.env`. |
 | `docker/data` | Lo crea Docker como root. El script de permisos de MySQL solo corre con la carpeta vacía; si ya existía, ejecutarlo a mano (ver install.md). |
@@ -357,6 +434,10 @@ Funcionalidad acordada para más adelante o detectada durante el desarrollo:
 | Colas | Contenedor `core-saas-queue` (`queue:work`) y pipeline de creación/destrucción de tenants en cola (`shouldBeQueued(true)`). Hoy todo es síncrono. |
 | Scheduler | Contenedor o proceso para `schedule:work`. |
 | Correo | Mailpit en local y configuración SMTP. Requisito para recuperar contraseñas. |
+| Seguridad | 2FA para super admins (Filament lo trae: `->multiFactorAuthentication([...])` en el panel), más adelante para usuarios de tenant. |
+| Errores | Integrar Sentry o Flare (ya reciben el contexto `tenant`). |
+| Auditoría | Programar `activitylog:clean` (central y `tenants:run`) cuando exista el scheduler; exportar auditoría. |
+| Archivos | Cuotas por tenant, S3 en producción (mismo esquema de prefijo por tenant), avatar de customers por la API. |
 | Recuperación de contraseña | Para usuarios del backoffice (`->passwordReset()` en el panel) y customers (endpoints en la API). |
 | API de customers | Registro propio (hoy solo los crea el tenant), cambio de contraseña, documentación OpenAPI, expiración de tokens (`sanctum.expiration` es `null`). |
 | Roles del panel central | Hoy todos los super admins tienen acceso total. |
@@ -365,4 +446,6 @@ Funcionalidad acordada para más adelante o detectada durante el desarrollo:
 | Backups | Respaldo y restauración por BD de tenant. |
 | Auditoría | Registro de acciones (alta/baja de tenants, cambios de roles). |
 | Producción | HTTPS, dominios reales, `SESSION_DOMAIN`, `APP_DEBUG=false`, `TrustProxies`, despliegue y migraciones de tenants en el deploy. |
-| CI | Pipeline con tests y Pint. |
+| CI | Pipeline con tests, Pint y Larastan. |
+
+**Hoja de ruta acordada** (orden sugerido): 1) correo, colas y recuperación de contraseña; 2) 2FA y Sentry/Flare (auditoría y contexto de logs ya hechos); 3) CI y backups; 4) planes con límites y funciones por tenant (Pennant); 5) cobro (Cashier) cuando el modelo comercial esté definido. Decisiones abiertas: alta self-service de tenants, proveedor de cobro y moneda, plataforma de despliegue.

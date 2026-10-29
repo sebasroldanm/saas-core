@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\App\Pages\Auth\EditProfile;
 use App\Http\Middleware\EnsureTenantIsActive;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use Filament\Http\Middleware\Authenticate;
@@ -32,6 +33,7 @@ class AppPanelProvider extends PanelProvider
             ->path('app')
             ->brandName(fn (): string => tenant('name') ?? 'core-saas')
             ->login()
+            ->profile(EditProfile::class, isSimple: false)
             ->authGuard('web')
             ->colors([
                 'primary' => Color::Amber,

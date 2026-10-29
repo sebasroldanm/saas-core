@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Jobs\DeleteTenantStorage;
 use Illuminate\Contracts\Http\Kernel;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\ServiceProvider;
 use Spatie\Permission\PermissionRegistrar;
 use Stancl\JobPipeline\JobPipeline;
@@ -19,6 +22,9 @@ class TenancyServiceProvider extends ServiceProvider
 {
     // By default, no namespace is used to support the callable array syntax.
     public static string $controllerNamespace = '';
+
+    // URL original del disco `public` (contexto central), para restaurarla al salir de un tenant
+    protected static ?string $centralPublicDiskUrl = null;
 
     public function events()
     {
@@ -47,6 +53,7 @@ class TenancyServiceProvider extends ServiceProvider
             Events\TenantDeleted::class => [
                 JobPipeline::make([
                     Jobs\DeleteDatabase::class,
+                    DeleteTenantStorage::class,
                 ])->send(function (Events\TenantDeleted $event) {
                     return $event->tenant;
                 })->shouldBeQueued(false), // `false` by default, but you probably want to make this `true` for production.
@@ -88,6 +95,16 @@ class TenancyServiceProvider extends ServiceProvider
                     $registrar->cacheKey = config('permission.cache.key').'.tenant.'.$event->tenancy->tenant->getTenantKey();
                     $registrar->clearPermissionsCollection();
                 },
+                // Logs y reportes de errores llevan el tenant (Context se propaga también a los jobs)
+                function (Events\TenancyBootstrapped $event): void {
+                    Context::add('tenant', $event->tenancy->tenant->getTenantKey());
+                },
+                // URLs públicas del disco `public` del tenant: se sirven por /media (routes/tenant.php)
+                function (Events\TenancyBootstrapped $event): void {
+                    static::$centralPublicDiskUrl ??= config('filesystems.disks.public.url');
+                    config(['filesystems.disks.public.url' => $event->tenancy->tenant->url('media')]);
+                    Storage::forgetDisk('public');
+                },
             ],
             Events\RevertingToCentralContext::class => [],
             Events\RevertedToCentralContext::class => [
@@ -95,6 +112,15 @@ class TenancyServiceProvider extends ServiceProvider
                     $registrar = app(PermissionRegistrar::class);
                     $registrar->cacheKey = config('permission.cache.key');
                     $registrar->clearPermissionsCollection();
+                },
+                function (): void {
+                    Context::forget('tenant');
+                },
+                function (): void {
+                    if (static::$centralPublicDiskUrl !== null) {
+                        config(['filesystems.disks.public.url' => static::$centralPublicDiskUrl]);
+                        Storage::forgetDisk('public');
+                    }
                 },
             ],
 

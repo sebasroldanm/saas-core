@@ -29,10 +29,26 @@ class CustomerAuthController extends Controller
 
         // Mismo mensaje para email inexistente, contraseña errónea o cliente inactivo
         if (! $customer || ! $customer->is_active || ! Hash::check($credentials['password'], $customer->password)) {
+            $log = activity('auth');
+            if ($customer) {
+                $log->performedOn($customer);
+            }
+            $log->event('login_failed')
+                ->withProperties(['guard' => 'customer', 'email' => $credentials['email'], 'ip' => $request->ip()])
+                ->log('Intento de inicio de sesión fallido en la API');
+
             throw ValidationException::withMessages(['email' => __('auth.failed')]);
         }
 
-        $customer->forceFill(['last_login_at' => now()])->save();
+        // saveQuietly: last_login_at no es un cambio de datos del cliente para la auditoría
+        $customer->forceFill(['last_login_at' => now()])->saveQuietly();
+
+        activity('auth')
+            ->causedBy($customer)
+            ->performedOn($customer)
+            ->event('login')
+            ->withProperties(['guard' => 'customer', 'device' => $credentials['device_name'] ?? 'api', 'ip' => $request->ip()])
+            ->log('Inicio de sesión en la API');
 
         $token = $customer->createToken($credentials['device_name'] ?? 'api');
 
@@ -50,7 +66,15 @@ class CustomerAuthController extends Controller
 
     public function logout(Request $request): Response
     {
-        $request->user('customer')->currentAccessToken()->delete();
+        $customer = $request->user('customer');
+        $customer->currentAccessToken()->delete();
+
+        activity('auth')
+            ->causedBy($customer)
+            ->performedOn($customer)
+            ->event('logout')
+            ->withProperties(['guard' => 'customer', 'ip' => $request->ip()])
+            ->log('Cierre de sesión en la API');
 
         return response()->noContent();
     }

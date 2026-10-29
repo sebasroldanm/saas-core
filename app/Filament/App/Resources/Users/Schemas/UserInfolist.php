@@ -2,6 +2,7 @@
 
 namespace App\Filament\App\Resources\Users\Schemas;
 
+use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Schema;
 
@@ -11,6 +12,11 @@ class UserInfolist
     {
         return $schema
             ->components([
+                ImageEntry::make('avatar_path')
+                    ->label('Avatar')
+                    ->disk('public')
+                    ->circular()
+                    ->defaultImageUrl(fn ($record): string => filament()->getUserAvatarUrl($record)),
                 TextEntry::make('name')
                     ->label('Nombre'),
                 TextEntry::make('email'),

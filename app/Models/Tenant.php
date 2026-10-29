@@ -17,6 +17,8 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  */
 class Tenant extends BaseTenant implements TenantWithDatabase
 {
+    // Sin LogsActivity: stancl asocia eventos propios a created/deleted y Laravel deja de disparar
+    // los eventos Eloquent que usa el trait. La auditoría del tenant se registra explícitamente.
     use HasDatabase, HasDomains;
 
     protected $casts = [
@@ -55,7 +57,15 @@ class Tenant extends BaseTenant implements TenantWithDatabase
 
     public function changeStatus(TenantStatus $status): void
     {
+        $previous = $this->status;
+
         $this->update(['status' => $status, 'status_changed_at' => now()]);
+
+        activity('tenant')
+            ->performedOn($this)
+            ->event('status_changed')
+            ->withChanges(['old' => ['status' => $previous?->getLabel()], 'attributes' => ['status' => $status->getLabel()]])
+            ->log("Estado: {$previous?->getLabel()} → {$status->getLabel()}");
     }
 
     public static function databaseNameFor(string $slug): string

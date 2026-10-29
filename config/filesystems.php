@@ -38,6 +38,16 @@ return [
             'report' => false,
         ],
 
+        // Subidas temporales de Livewire. Raíz fija (no está en tenancy.filesystem.disks): la ruta de
+        // subida de Livewire no inicializa la tenancy, así que el archivo temporal debe quedar en un
+        // lugar común. Al guardar el formulario se mueve al disco `public` del tenant.
+        'livewire-tmp' => [
+            'driver' => 'local',
+            'root' => storage_path('app/livewire-tmp'),
+            'throw' => false,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

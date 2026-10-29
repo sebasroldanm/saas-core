@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Models\Domain;
 use App\Models\Tenant;
 use Stancl\Tenancy\Bootstrappers\CacheTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\DatabaseTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\FilesystemTenancyBootstrapper;
 use Stancl\Tenancy\Bootstrappers\QueueTenancyBootstrapper;
-use Stancl\Tenancy\Database\Models\Domain;
 use Stancl\Tenancy\Features\UserImpersonation;
 use Stancl\Tenancy\TenantDatabaseManagers\MySQLDatabaseManager;
 use Stancl\Tenancy\TenantDatabaseManagers\PostgreSQLDatabaseManager;
@@ -109,7 +109,9 @@ return [
         /**
          * Each disk listed in the 'disks' array will be suffixed by the suffix_base, followed by the tenant_id.
          */
-        'suffix_base' => 'tenant_',
+        // Carpeta de archivos del tenant: storage/{prefijo}{slug}. Mismo prefijo que la BD, para que los
+        // tests (tenant_test_) nunca escriban ni borren en las carpetas de los tenants de desarrollo
+        'suffix_base' => env('TENANT_DB_PREFIX', 'tenant_'),
         'disks' => [
             'local',
             'public',
@@ -123,7 +125,7 @@ return [
          */
         'root_override' => [
             // Disks whose roots should be overridden after storage_path() is suffixed.
-            'local' => '%storage_path%/app/',
+            'local' => '%storage_path%/app/private/', // privado: fuera de app/public, que se sirve por /media
             'public' => '%storage_path%/app/public/',
         ],
 
@@ -188,7 +190,9 @@ return [
      * enabled. But it may be useful to disable them if you use external
      * storage (e.g. S3 / Dropbox) or have a custom asset controller.
      */
-    'routes' => true,
+    // Ruta /tenancy/assets de stancl desactivada: solo identifica por dominio completo. Los archivos
+    // del tenant se sirven por /media (routes/tenant.php)
+    'routes' => false,
 
     /**
      * Parameters used by the tenants:migrate command.

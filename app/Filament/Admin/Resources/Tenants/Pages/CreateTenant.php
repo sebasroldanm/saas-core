@@ -6,6 +6,7 @@ use App\Enums\TenantStatus;
 use App\Filament\Admin\Resources\Tenants\TenantResource;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\Audit;
 use Filament\Resources\Pages\CreateRecord;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
@@ -31,11 +32,15 @@ class CreateTenant extends CreateRecord
 
         try {
             // Los roles base ya existen: los crea TenantDatabaseSeeder en el pipeline de creación
-            $tenant->run(fn () => User::create([
-                'name' => $admin['admin_name'],
-                'email' => $admin['admin_email'],
-                'password' => $admin['admin_password'],
-            ])->assignRole(User::ADMIN_ROLE));
+            $tenant->run(function () use ($admin): void {
+                $user = User::create([
+                    'name' => $admin['admin_name'],
+                    'email' => $admin['admin_email'],
+                    'password' => $admin['admin_password'],
+                ])->assignRole(User::ADMIN_ROLE);
+
+                Audit::rolesChanged($user, [], [User::ADMIN_ROLE]);
+            });
         } catch (Throwable $e) {
             // Sin admin el tenant queda inutilizable: se deshace todo, incluida su BD
             $tenant->delete();
@@ -54,6 +59,16 @@ class CreateTenant extends CreateRecord
         if (! $tenant->domains()->exists()) {
             $tenant->domains()->create(['domain' => $tenant->id]);
         }
+
+        activity('tenant')
+            ->performedOn($tenant)
+            ->event('created')
+            ->withProperties([
+                'name' => $tenant->name,
+                'database' => Tenant::databaseNameFor($tenant->id),
+                'domains' => $tenant->domains()->pluck('domain')->all(),
+            ])
+            ->log('Tenant creado');
     }
 
     protected function getRedirectUrl(): string

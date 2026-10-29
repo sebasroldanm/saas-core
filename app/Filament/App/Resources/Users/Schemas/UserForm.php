@@ -2,6 +2,7 @@
 
 namespace App\Filament\App\Resources\Users\Schemas;
 
+use App\Filament\App\Resources\Users\Schemas\Components\AvatarUpload;
 use App\Models\User;
 use App\Support\RoleAssignment;
 use Closure;
@@ -16,6 +17,7 @@ class UserForm
     {
         return $schema
             ->components([
+                AvatarUpload::make(),
                 TextInput::make('name')
                     ->label('Nombre')
                     ->required()

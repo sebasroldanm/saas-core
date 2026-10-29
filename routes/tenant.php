@@ -3,9 +3,10 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\CustomerAuthController;
+use App\Http\Controllers\ImpersonationController;
+use App\Http\Controllers\TenantMediaController;
 use App\Http\Middleware\EnsureTenantIsActive;
 use Illuminate\Support\Facades\Route;
-use Stancl\Tenancy\Features\UserImpersonation;
 use Stancl\Tenancy\Middleware\InitializeTenancyByDomainOrSubdomain;
 use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
 
@@ -29,9 +30,17 @@ Route::middleware([
     Route::redirect('/', '/app');
 
     // Acceso del super admin generado desde el panel central (token de un solo uso, 60 s)
-    Route::get('/impersonate/{token}', fn (string $token) => UserImpersonation::makeResponse($token))
-        ->name('tenant.impersonate');
+    Route::get('/impersonate/{token}', ImpersonationController::class)->name('tenant.impersonate');
 });
+
+// Archivos públicos del tenant (avatares, etc.). Sin sesión ni CSRF: solo identifica el tenant
+Route::middleware([
+    InitializeTenancyByDomainOrSubdomain::class,
+    PreventAccessFromCentralDomains::class,
+    EnsureTenantIsActive::class,
+])->get('/media/{path}', TenantMediaController::class)
+    ->where('path', '.*')
+    ->name('tenant.media');
 
 Route::middleware([
     'api',
