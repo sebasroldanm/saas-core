@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\V1\CustomerAuthController;
 use App\Http\Middleware\EnsureTenantIsActive;
 use Illuminate\Support\Facades\Route;
 use Stancl\Tenancy\Features\UserImpersonation;
@@ -15,6 +16,7 @@ use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
 |
 | Rutas de cada tenant, identificado por dominio propio o subdominio.
 | El panel Filament del tenant (/app) se registra en AppPanelProvider.
+| La API de clientes (customers) vive en /api/v1 del mismo dominio.
 |
 */
 
@@ -29,4 +31,20 @@ Route::middleware([
     // Acceso del super admin generado desde el panel central (token de un solo uso, 60 s)
     Route::get('/impersonate/{token}', fn (string $token) => UserImpersonation::makeResponse($token))
         ->name('tenant.impersonate');
+});
+
+Route::middleware([
+    'api',
+    InitializeTenancyByDomainOrSubdomain::class,
+    PreventAccessFromCentralDomains::class,
+    EnsureTenantIsActive::class,
+])->prefix('api/v1')->name('tenant.api.')->group(function () {
+    Route::post('auth/login', [CustomerAuthController::class, 'login'])
+        ->middleware('throttle:customer-login')
+        ->name('auth.login');
+
+    Route::middleware('auth:customer')->group(function () {
+        Route::get('auth/me', [CustomerAuthController::class, 'me'])->name('auth.me');
+        Route::post('auth/logout', [CustomerAuthController::class, 'logout'])->name('auth.logout');
+    });
 });

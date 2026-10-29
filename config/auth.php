@@ -1,5 +1,7 @@
 <?php
 
+use App\Models\Admin;
+use App\Models\Customer;
 use App\Models\User;
 
 return [
@@ -48,6 +50,12 @@ return [
             'driver' => 'session',
             'provider' => 'admins',
         ],
+
+        // Clientes del tenant: autenticación por token (Sanctum) en la API
+        'customer' => [
+            'driver' => 'sanctum',
+            'provider' => 'customers',
+        ],
     ],
 
     /*
@@ -75,7 +83,12 @@ return [
 
         'admins' => [
             'driver' => 'eloquent',
-            'model' => App\Models\Admin::class,
+            'model' => Admin::class,
+        ],
+
+        'customers' => [
+            'driver' => 'eloquent',
+            'model' => Customer::class,
         ],
 
         // 'users' => [

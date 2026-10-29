@@ -5,14 +5,13 @@ namespace Tests\Feature;
 use App\Enums\TenantStatus;
 use App\Filament\Admin\Resources\Tenants\Pages\CreateTenant;
 use App\Filament\Admin\Resources\Tenants\Pages\ListTenants;
-use App\Models\Admin;
 use App\Models\Tenant;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
-use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Livewire\Livewire;
 use Stancl\Tenancy\Database\Models\ImpersonationToken;
+use Tests\Concerns\InteractsWithTenants;
 use Tests\TestCase;
 
 /**
@@ -21,28 +20,11 @@ use Tests\TestCase;
  */
 class TenantLifecycleTest extends TestCase
 {
-    use DatabaseMigrations;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        Filament::currentDomain('localhost');
-        Filament::setCurrentPanel(Filament::getPanel('admin'));
-
-        $this->actingAs(Admin::create([
-            'name' => 'Root',
-            'email' => 'root@core-saas.test',
-            'password' => 'password',
-        ]), 'admin');
-    }
+    use DatabaseMigrations, InteractsWithTenants;
 
     protected function tearDown(): void
     {
-        tenancy()->end();
-
-        // Borra las BD de tenants creadas por el test
-        Tenant::all()->each->delete();
+        $this->destroyTenants();
 
         parent::tearDown();
     }
@@ -169,33 +151,5 @@ class TenantLifecycleTest extends TestCase
 
         $this->assertNull(Tenant::find('acme'));
         $this->assertFalse($tenant->database()->manager()->databaseExists('tenant_test_acme'));
-    }
-
-    /**
-     * Tras una petición al panel del tenant, vuelve al contexto central (BD y panel admin).
-     */
-    private function backToCentral(): void
-    {
-        tenancy()->end();
-        Filament::setCurrentPanel(Filament::getPanel('admin'));
-    }
-
-    /**
-     * @param  array<string>  $domains
-     */
-    private function createTenant(string $slug, array $domains = []): void
-    {
-        Livewire::test(CreateTenant::class)
-            ->fillForm([
-                'name' => ucfirst($slug),
-                'id' => $slug,
-                'domains' => array_map(fn (string $domain): array => ['domain' => $domain], $domains),
-                'admin_name' => "Admin {$slug}",
-                'admin_email' => "admin@{$slug}.test",
-                'admin_password' => 'password123',
-                'admin_password_confirmation' => 'password123',
-            ])
-            ->call('create')
-            ->assertHasNoFormErrors();
     }
 }

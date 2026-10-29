@@ -30,11 +30,12 @@ class CreateTenant extends CreateRecord
         ]);
 
         try {
+            // Los roles base ya existen: los crea TenantDatabaseSeeder en el pipeline de creación
             $tenant->run(fn () => User::create([
                 'name' => $admin['admin_name'],
                 'email' => $admin['admin_email'],
                 'password' => $admin['admin_password'],
-            ]));
+            ])->assignRole(User::ADMIN_ROLE));
         } catch (Throwable $e) {
             // Sin admin el tenant queda inutilizable: se deshace todo, incluida su BD
             $tenant->delete();

@@ -8,6 +8,7 @@ use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Spatie\Permission\PermissionRegistrar;
 use Stancl\JobPipeline\JobPipeline;
 use Stancl\Tenancy\Events;
 use Stancl\Tenancy\Jobs;
@@ -28,7 +29,8 @@ class TenancyServiceProvider extends ServiceProvider
                 JobPipeline::make([
                     Jobs\CreateDatabase::class,
                     Jobs\MigrateDatabase::class,
-                    // Jobs\SeedDatabase::class,
+                    // Crea permisos y roles base (TenantDatabaseSeeder, ver config tenancy.seeder_parameters)
+                    Jobs\SeedDatabase::class,
 
                     // Your own jobs to prepare the tenant.
                     // Provision API keys, create S3 buckets, anything you want!
@@ -79,9 +81,22 @@ class TenancyServiceProvider extends ServiceProvider
             ],
 
             Events\BootstrappingTenancy::class => [],
-            Events\TenancyBootstrapped::class => [],
+            Events\TenancyBootstrapped::class => [
+                // La cache de spatie/permission usa un store sin tags: se separa por tenant con la clave
+                function (Events\TenancyBootstrapped $event): void {
+                    $registrar = app(PermissionRegistrar::class);
+                    $registrar->cacheKey = config('permission.cache.key').'.tenant.'.$event->tenancy->tenant->getTenantKey();
+                    $registrar->clearPermissionsCollection();
+                },
+            ],
             Events\RevertingToCentralContext::class => [],
-            Events\RevertedToCentralContext::class => [],
+            Events\RevertedToCentralContext::class => [
+                function (): void {
+                    $registrar = app(PermissionRegistrar::class);
+                    $registrar->cacheKey = config('permission.cache.key');
+                    $registrar->clearPermissionsCollection();
+                },
+            ],
 
             // Resource syncing
             Events\SyncedResourceSaved::class => [

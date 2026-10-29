@@ -6,6 +6,7 @@ use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 
@@ -21,6 +22,9 @@ class UsersTable
                     ->sortable(),
                 TextColumn::make('email')
                     ->searchable(),
+                TextColumn::make('roles.name')
+                    ->label('Roles')
+                    ->badge(),
                 TextColumn::make('created_at')
                     ->label('Creado')
                     ->dateTime('d/m/Y H:i')
@@ -29,15 +33,17 @@ class UsersTable
             ->filters([
                 //
             ])
+            // Visibilidad de cada acción según UserPolicy (permisos + RoleAssignment)
             ->recordActions([
+                ViewAction::make(),
                 EditAction::make(),
-                // Nadie puede borrarse a sí mismo (evita dejar el tenant sin acceso)
-                DeleteAction::make()
-                    ->hidden(fn ($record): bool => $record->is(auth()->user())),
+                DeleteAction::make(),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    // El borrado masivo revisa la policy `delete` de cada registro
+                    DeleteBulkAction::make()
+                        ->authorizeIndividualRecords('delete'),
                 ]),
             ]);
     }
