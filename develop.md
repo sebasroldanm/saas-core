@@ -75,7 +75,7 @@ Al identificarlo, stancl cambia la conexión por defecto a la BD del tenant y a�
 | Tabla | Contenido |
 |---|---|
 | `admins` | Super admins del panel central |
-| `tenants` | `id` (= slug), `name`, `status`, `status_changed_at`, `data` (JSON de stancl, sin uso por ahora) |
+| `tenants` | `id` (= slug), `name`, `status`, `status_changed_at`, contacto (`contact_email`, `contact_phone`), región (`timezone`), marca (`primary_color`, `logo_path`, `logo_dark_path`, `favicon_path`), `data` (JSON de stancl, sin uso) |
 | `domains` | Dominios/subdominios de cada tenant (FK con cascada) |
 | `tenant_user_impersonation_tokens` | Tokens de un solo uso de "Entrar como admin" |
 | `activity_log` | Auditoría del panel central. `subject_id` es texto (el id de un tenant es su slug) |
@@ -91,7 +91,7 @@ Al identificarlo, stancl cambia la conexión por defecto a la BD del tenant y a�
 | `personal_access_tokens` | Tokens Sanctum de los customers |
 | `activity_log` | Auditoría del tenant |
 
-**Archivos**: cada tenant tiene su carpeta `storage/tenant_{slug}/` (ver [3.6](#36-archivos-y-avatares)).
+**Archivos**: cada tenant tiene su carpeta `storage/tenant_{slug}/` (ver [3.9](#39-archivos-y-avatares)).
 
 **Tests**: BD central `core_saas_testing`, tenants con BD y carpeta de storage `tenant_test_*` (prefijo `TENANT_DB_PREFIX` en [phpunit.xml](phpunit.xml)).
 
@@ -140,7 +140,8 @@ Solo super admins (guard `admin`). Recurso **Tenants**:
 | Acción | Qué hace técnicamente |
 |---|---|
 | **Crear** | Valida nombre, slug (`^[a-z][a-z0-9-]*$`, máx. 40, único, y que no exista ya la BD `tenant_{slug}`), dominios (únicos, no centrales) y datos del admin. `Tenant::create()` dispara el pipeline de stancl: `CreateDatabase` → `MigrateDatabase` → `SeedDatabase` (`TenantDatabaseSeeder`). Luego crea el `User` admin con rol Administrador. Si eso falla, borra el tenant y su BD. Sin dominios, crea uno igual al slug. La página **no usa transacción** porque `CREATE DATABASE` hace commit implícito. |
-| **Editar** | Nombre y dominios. El slug no se puede cambiar. |
+| **Ver (ficha)** | Página de solo lectura (clic en la fila): general, acceso (todas las URLs con su tipo y cuál es la principal, URL de la API), contacto, región (zona y hora local actual), marca (color, logos, favicon), uso (BD y tamaño, archivos, usuarios, clientes, último login) y los últimos 10 eventos de auditoría central. Datos de uso en [TenantStats](app/Support/TenantStats.php). |
+| **Editar** | Nombre, dominios, contacto y zona horaria (la marca la edita el tenant). El slug no se puede cambiar. Los cambios se auditan como `settings_updated` con antes/después. |
 | **Entrar como admin** | Genera un token de impersonación (stancl `UserImpersonation`, 60 s, un solo uso) para el Administrador más antiguo del tenant y redirige a `{tenant}/impersonate/{token}`, que hace login en el guard `web` y redirige a `/app`. Solo existe en el panel central. Mientras dura, el panel del tenant muestra una **barra fija** ("Estás en X como Y, ingresaste desde el panel central como Z") con el botón **Volver al panel central**: cierra la sesión del tenant y redirige a la ficha del tenant en `/admin`, cuya sesión sigue abierta (otra cookie, otro dominio). |
 | **Abrir login** | Abre `/app/login` del tenant en otra pestaña. |
 | **Restablecer contraseña del admin** | Elige un usuario con rol Administrador del tenant (el select solo ofrece administradores y la acción aborta con 403 si se fuerza otro) y: **enviar enlace por email** (recomendado; mismo flujo que "¿Olvidaste tu contraseña?", broker `users` en la BD del tenant, URL firmada en el dominio del tenant, vence en `auth.passwords.users.expire` minutos, 1 envío por minuto) o **definir contraseña** (se cambia en la BD del tenant, rota `remember_token`, Filament cierra sus otras sesiones y se le avisa por email sin la contraseña). La contraseña nunca pasa por la BD central. Se audita en ambas BD (`admin_password_reset`). Código: [TenantAdminAccess](app/Support/TenantAdminAccess.php). |
@@ -159,15 +160,17 @@ Usuarios del backoffice (guard `web`, tabla `users` de la BD del tenant). Middle
 | **Usuarios** | Listado, detalle, alta, edición y borrado con roles y avatar. Contraseña opcional en edición. |
 | **Clientes** | Listado, detalle, alta, edición y borrado de customers (nombre, email, teléfono, contraseña, activo). |
 | **Roles** (Shield, grupo Administración) | Crear roles y marcar permisos por recurso. |
-| **Auditoría** (grupo Administración) | Solo lectura. Ver [3.5](#35-auditoría). |
+| **Auditoría** (grupo Administración) | Solo lectura. Ver [3.8](#38-auditoría). |
 | **¿Olvidaste tu contraseña?** (login) | Envía el enlace de restablecimiento por correo (`->passwordReset()` del panel). Al completarlo se audita `password_reset`. |
+| **Configuración** (grupo Administración) | Marca, región y contacto del tenant ([TenantSettings](app/Filament/App/Pages/TenantSettings.php)). Permiso `View:TenantSettings` (por defecto solo el Administrador). Escribe en el `Tenant` (BD central); los archivos van al disco `public` del tenant. Auditado en la BD del tenant. |
 | **Perfil** (menú de usuario) | Cada usuario edita nombre, email, contraseña y avatar sin necesitar permisos sobre Usuarios. |
 
 ### 3.3 Roles y permisos
 
-- Permisos por recurso con formato `Acción:Modelo`, derivados por Shield de los recursos del panel `app` (19 en total):
+- Permisos con formato `Acción:Modelo`, derivados por Shield de los recursos y páginas del panel `app` (20 en total):
   - `User`, `Customer`: `ViewAny`, `View`, `Create`, `Update`, `Delete`, `DeleteAny` (métodos por defecto, `config/filament-shield.php` → `policies.methods`);
-  - `Role`: `ViewAny`, `View`, `Create`, `Update`, `Delete`; `Activity` (auditoría): `ViewAny`, `View` (definidos en `resources.manage`, con `policies.merge = false`).
+  - `Role`: `ViewAny`, `View`, `Create`, `Update`, `Delete`; `Activity` (auditoría): `ViewAny`, `View` (definidos en `resources.manage`, con `policies.merge = false`);
+  - página Configuración: `View:TenantSettings` (trait `HasPageShield`; pestaña "Páginas" del editor de roles).
 - Roles base que crea [TenantRolesSeeder](database/seeders/TenantRolesSeeder.php) (`BASE_ROLES`):
 
   | Rol | Permisos |
@@ -190,6 +193,7 @@ Base: `http://{slug}.localhost:8080/api/v1` (rutas en [routes/tenant.php](routes
 
 | Método | Ruta | Auth | Respuesta |
 |---|---|---|---|
+| `GET` | `/tenant` | — | `{ data: { name, timezone, branding: { primary_color, logo_url, logo_dark_url, favicon_url } } }`. Público: lo usa la app antes del login |
 | `POST` | `/auth/login` | — | `{ token, token_type: "Bearer", customer }`. Body: `email`, `password`, `device_name` (opcional). |
 | `GET` | `/auth/me` | Bearer | `{ data: customer }` |
 | `POST` | `/auth/logout` | Bearer | `204`; revoca el token actual |
@@ -214,7 +218,46 @@ curl http://acme.localhost:8080/api/v1/auth/me \
   -H "Accept: application/json" -H "Authorization: Bearer {token}"
 ```
 
-### 3.5 Auditoría
+### 3.5 Zona horaria por tenant
+
+- **Regla**: la BD y la app trabajan siempre en **UTC** (`config/app.php`), nunca se cambia en tiempo de ejecución. Cada tenant define su zona con un **nombre IANA** (`America/Bogota`), no un offset fijo (`GMT-5`): el nombre aplica el horario de verano. Sin zona definida se usa `TENANT_DEFAULT_TIMEZONE` (`config/core.php`, por defecto `UTC`).
+- **Panel del tenant**: al identificar el tenant se llama `FilamentTimezone::set(...)` (TenancyServiceProvider). Desde ahí todas las columnas, detalles y `DateTimePicker` de Filament muestran la hora local y convierten a UTC al guardar, sin tocar cada recurso. Al volver al contexto central se restablece.
+- **Filtros por fecha**: el día elegido es un día de la zona del tenant; se convierte a un rango UTC antes de consultar (ver filtro "Desde/Hasta" de [ActivityTable](app/Filament/Shared/Activities/ActivityTable.php)). Hacer lo mismo en filtros nuevos.
+- **API**: fechas siempre en UTC ISO 8601 (`...Z`); `GET /api/v1/tenant` informa `timezone` para que la app convierta.
+- **Campos de solo fecha** (nacimiento, vencimientos): columnas `date`, no se convierten.
+- Selector con todas las zonas agrupadas por región y el offset actual en la etiqueta ([Timezones](app/Support/Timezones.php)).
+
+### 3.6 Marca por tenant
+
+| Elemento | Dónde se aplica | Formato |
+|---|---|---|
+| Color primario | Botones, enlaces, elementos activos del panel y del login | Hex `#rrggbb`. Se rechazan colores casi blancos (contraste con blanco < 1.5). Por defecto `TENANT_DEFAULT_PRIMARY_COLOR` |
+| Logo | Barra superior y login (reemplaza al nombre) | PNG/JPG/WebP, hasta 1 MB |
+| Logo modo oscuro | Igual, en modo oscuro (si falta, el logo normal) | PNG/JPG/WebP, hasta 1 MB |
+| Favicon | Pestaña del navegador | PNG/ICO, hasta 256 KB |
+
+- Sin SVG: servido desde el dominio del tenant podría ejecutar scripts.
+- Archivos en `storage/tenant_{slug}/app/public/branding/`, servidos por `/media`; al reemplazar o quitar uno se borra el anterior. URLs: `Tenant::brandingUrl()` (siempre por el dominio del tenant, funciona también desde el panel central).
+- Como el tenant se identifica antes del login, **el login ya sale con su marca**.
+- **Cómo se aplica**: logo, logo oscuro y favicon con `->brandLogo(fn ...)`, `->darkModeBrandLogo(...)`, `->favicon(...)` en `AppPanelProvider`. El color, con `FilamentColor::register(fn ...)` **diferido** en `AppServiceProvider` (ver trampas: los `->colors()` del panel se evalúan antes de identificar al tenant).
+- La API la expone en `GET /api/v1/tenant` para que las apps de los customers usen la misma marca.
+
+### 3.7 Dominios: cómo se configuran
+
+Cada tenant entra por uno o más dominios (tabla `domains`, BD central). En el formulario del tenant cada fila muestra la URL resultante.
+
+| Tipo | Qué se escribe | URL resultante (local) | Qué hace falta |
+|---|---|---|---|
+| **Subdominio** | Solo el nombre, sin puntos: `acme` | `http://acme.localhost:8080/app` | Nada en local (Chrome/Edge resuelven `*.localhost`). En producción, un registro DNS comodín `*.midominio.com` → servidor |
+| **Dominio propio** | El dominio completo: `acme.test`, `app.cliente.com` | `http://acme.test:8080/app` | Local: línea en el archivo hosts (`127.0.0.1 acme.test`). Producción: el cliente crea un registro (CNAME a `midominio.com` o A a la IP) y hace falta certificado SSL para ese dominio |
+
+- **Principal**: el dominio registrado primero. Se usa en enlaces, correos, URLs de archivos y la acción "Abrir login". Se ve marcado en la ficha del tenant.
+- Sin dominios, al crear el tenant se agrega el slug como subdominio.
+- Validaciones: minúsculas, números, guiones y puntos; únicos entre todos los tenants; no puede ser un dominio central; escribir `acme.localhost` da error y pide escribir solo `acme`.
+- **Dominio central**: `CENTRAL_DOMAINS` en `.env` (por defecto `localhost,127.0.0.1`). El primero es la base de los subdominios. En producción: `CENTRAL_DOMAINS=midominio.com` y `APP_URL=https://midominio.com` (de `APP_URL` salen esquema y puerto de las URLs de tenants).
+- Identificación: `InitializeTenancyByDomainOrSubdomain` (stancl): si el host termina en un dominio central busca el subdominio; si no, el dominio completo.
+
+### 3.8 Auditoría
 
 spatie/laravel-activitylog. Cada registro se guarda en la tabla `activity_log` **de la BD del contexto actual**: lo que pasa en el panel central va a la central y lo que pasa en un tenant, a la BD de ese tenant. Quién lo hizo (`causer`) sale del guard activo; en un tenant puede ser un `User` o un `Admin` central (impersonación, alta del tenant).
 
@@ -231,7 +274,7 @@ spatie/laravel-activitylog. Cada registro se guarda en la tabla `activity_log` *
 - **Pantallas**: "Auditoría" en ambos paneles (`/admin/auditoria`, `/app/auditoria`), solo lectura, con filtros por módulo, evento y fechas, y detalle con valores antes/después. En el tenant requiere `ViewAny:Activity` (por defecto solo el Administrador); en el central la ven todos los super admins ([ActivityPolicy](app/Policies/ActivityPolicy.php)).
 - **Retención**: `config/activitylog.php` → `clean_after_days` (365). La limpieza (`activitylog:clean`) aún no está programada (ver pendientes).
 
-### 3.6 Archivos y avatares
+### 3.9 Archivos y avatares
 
 **Dónde se guardan**: stancl (`FilesystemTenancyBootstrapper`) cambia la raíz de `storage_path()` y de los discos `local` y `public` mientras hay un tenant inicializado:
 
@@ -253,7 +296,7 @@ El código usa siempre `Storage::disk('public')` sin pensar en el tenant: la sep
 
 **Archivos privados** (documentos, adjuntos): usar el disco `local` (también separado por tenant) y servirlos con una ruta propia que verifique permisos, nunca por `/media`.
 
-### 3.7 Logs y errores con contexto de tenant
+### 3.10 Logs y errores con contexto de tenant
 
 Al inicializar un tenant se agrega `tenant` al [Context](https://laravel.com/docs/context) de Laravel y se quita al volver al contexto central. Laravel lo adjunta a cada línea de log y a los errores reportados, y lo propaga a los jobs encolados:
 
@@ -396,6 +439,7 @@ Definir en `.env` `APP_PORT`, `DB_FORWARD_PORT`, `REDIS_FORWARD_PORT` o `VITE_PO
 | `TenantPermissionsTest` | Roles base, Administrador, Validador, anti-escalada del Colaborador, roles personalizados, cache de permisos por tenant |
 | `CustomerApiTest` | Login/me/logout, credenciales inválidas, aislamiento de tokens, revocación, tenant inactivo, rate limit |
 | `AuditTest` | Auditoría central del ciclo de vida, impersonación en ambas BD, acciones del tenant (usuarios, roles, permisos, clientes), logins, permiso de la pantalla, contexto de logs |
+| `TenantSettingsTest` | Contacto y zona desde el central (auditado), validación de zona y de dominio central, fechas UTC mostradas en la zona del tenant, filtro de fechas por día del tenant, marca desde Configuración (archivos, auditoría, logo/favicon en el HTML, color registrado), color claro y SVG rechazados, permiso de Configuración, `GET /api/v1/tenant`, ficha del tenant |
 | `TenantAdminPasswordResetTest` | Enlace desde el panel central (dominio del tenant, firma, auditoría sin datos sensibles), completar el restablecimiento, throttling, contraseña manual (aviso, sesiones), solo administradores, "¿Olvidaste tu contraseña?" del tenant |
 | `ImpersonationBannerTest` | Barra visible solo al entrar desde el panel central, "Volver al panel central" (redirección, cierre de sesión, auditoría), logout de Filament auditado como fin del acceso |
 | `AvatarTest` | Subida real por HTTP a la ruta de Livewire con sesión, subida desde el perfil a la carpeta del tenant, URL `/media`, aislamiento entre tenants y path traversal, tipos rechazados, borrado de archivos y de la carpeta al destruir |
@@ -423,6 +467,7 @@ Definir en `.env` `APP_PORT`, `DB_FORWARD_PORT`, `REDIS_FORWARD_PORT` o `VITE_PO
 | `LogsActivity` en `Tenant` | No usarlo: stancl asocia sus eventos (`TenantCreated`, `TenantDeleted`) a `created`/`deleted` y, como sus listeners devuelven valores, Laravel no dispara el evento Eloquent que usa el trait. La auditoría del tenant se registra explícitamente. |
 | Rutas globales sin tenancy | Las rutas que no identifican al tenant (subida y preview de Livewire, assets) **no deben resolver el usuario de la sesión**: lo buscarían en la BD central (`Table 'core_saas.users' doesn't exist`). Ej.: el `throttle` por defecto llama `$request->user()`; por eso la subida usa el limitador `livewire-upload` (host + IP, `AppServiceProvider`). |
 | Tenants existentes tras un pull | Si llegan migraciones o permisos nuevos de tenant, correr `art tenants:migrate` y `art tenants:seed --class="Database\Seeders\TenantRolesSeeder"`; si no, aparecen errores como `Table 'tenant_x.activity_log' doesn't exist`. |
+| Colores del panel del tenant | No usar `->colors()` en `AppPanelProvider` para el color del tenant: Filament evalúa los colores del panel al **arrancarlo**, que ocurre antes de identificar al tenant (saldría el color por defecto). El color se registra con una función diferida en `AppServiceProvider` y el panel no define `primary`. Además `FilamentColor` cachea los colores tras la primera lectura: en procesos largos (tests, Octane) el primer valor queda fijo. |
 | Correos y colas | Las notificaciones de Filament y las propias implementan `ShouldQueue`: van a Redis y las envía el contenedor `queue`. Si no está corriendo, no sale ningún correo (sin error visible). En tests la cola es `sync` y se usa `Notification::fake()`. |
 | URLs de tenant generadas desde el central | Al generar una URL del panel `app` fuera de una petición del tenant (p. ej. el enlace de restablecimiento desde el panel central), forzar la raíz con `URL::forceRootUrl($tenant->url('/'))` y el panel con `Filament::setCurrentPanel('app')`, y restaurarlos después (ver `TenantAdminAccess`). |
 | Disco temporal de Livewire | Debe seguir siendo `livewire-tmp` (`config/livewire.php`): si fuera `local`, la subida (sin tenancy) y el guardado (con tenancy) usarían carpetas distintas. |
@@ -452,7 +497,7 @@ Funcionalidad acordada para más adelante o detectada durante el desarrollo:
 | API de customers | Registro propio (hoy solo los crea el tenant), cambio de contraseña, documentación OpenAPI, expiración de tokens (`sanctum.expiration` es `null`). |
 | Roles del panel central | Hoy todos los super admins tienen acceso total. |
 | Planes, módulos y cobro por tenant | Fuera de alcance por ahora. |
-| Configuración por tenant | Logo, colores, zona horaria, etc. |
+| Configuración por tenant | Marca, zona horaria y contacto: hechos (3.5–3.7). Falta: idioma por tenant (B-06), zona por usuario, remitente de correo con la marca del tenant. |
 | Backups | Respaldo y restauración por BD de tenant. |
 | Auditoría | Registro de acciones (alta/baja de tenants, cambios de roles). |
 | Producción | HTTPS, dominios reales, `SESSION_DOMAIN`, `APP_DEBUG=false`, `TrustProxies`, despliegue y migraciones de tenants en el deploy. |
@@ -467,10 +512,10 @@ Evaluado el paquete [tomatophp/filament-tenancy](https://github.com/tomatophp/fi
 | ID | Mejora | Origen | Valor | Esfuerzo | Depende de |
 |---|---|---|---|---|---|
 | B-01 | ✅ Restablecer la contraseña del admin del tenant desde el panel central (hecho, ver 3.1) | tomatophp | Alto | S | — |
-| B-02 | Zona horaria por tenant (BD en UTC) | Propia | Alto | M | — |
-| B-03 | Marca por tenant: logo, colores, favicon | tomatophp (colores) + propia | Alto | M | — |
-| B-04 | Datos de contacto del tenant (email y teléfono del responsable) | tomatophp | Medio | S | — |
-| B-05 | Página de detalle del tenant en el panel central | tomatophp | Medio | S | — |
+| B-02 | ✅ Zona horaria por tenant (hecho, ver 3.5) | Propia | Alto | M | — |
+| B-03 | ✅ Marca por tenant: logo, colores, favicon (hecho, ver 3.6) | tomatophp (colores) + propia | Alto | M | — |
+| B-04 | ✅ Datos de contacto del tenant (hecho, ver 3.1) | tomatophp | Medio | S | — |
+| B-05 | ✅ Página de detalle del tenant (hecho, ver 3.1) | tomatophp | Medio | S | — |
 | B-06 | Traducciones (`lang/es`, `lang/en`) e idioma por tenant | tomatophp | Medio | M | B-02 (misma pantalla de configuración) |
 | B-07 | "¿Cuál es mi espacio?" en el dominio central | tomatophp | Medio | S | Correo |
 | B-08 | Alta self-service de tenants con verificación | tomatophp | Según negocio | L | Correo, colas, decisión abierta |

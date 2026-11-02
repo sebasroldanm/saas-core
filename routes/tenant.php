@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\CustomerAuthController;
+use App\Http\Controllers\Api\V1\TenantController;
 use App\Http\Controllers\ImpersonationController;
 use App\Http\Controllers\TenantMediaController;
 use App\Http\Middleware\EnsureTenantIsActive;
@@ -49,6 +50,8 @@ Route::middleware([
     PreventAccessFromCentralDomains::class,
     EnsureTenantIsActive::class,
 ])->prefix('api/v1')->name('tenant.api.')->group(function () {
+    Route::get('tenant', TenantController::class)->name('tenant');
+
     Route::post('auth/login', [CustomerAuthController::class, 'login'])
         ->middleware('throttle:customer-login')
         ->name('auth.login');

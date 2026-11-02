@@ -31,6 +31,7 @@ class Audit
         'updated' => 'Actualizado',
         'deleted' => 'Eliminado',
         'status_changed' => 'Cambio de estado',
+        'settings_updated' => 'Configuración actualizada',
         'destroyed' => 'Destruido',
         'login' => 'Inicio de sesión',
         'login_failed' => 'Login fallido',
@@ -69,6 +70,43 @@ class Audit
     public static function eventLabel(?string $event): string
     {
         return static::EVENTS[$event] ?? (string) $event;
+    }
+
+    /**
+     * Atributos del tenant que se auditan al editarlo (panel central o "Configuración" del tenant).
+     */
+    public const TENANT_SETTINGS = [
+        'name', 'contact_email', 'contact_phone', 'timezone',
+        'primary_color', 'logo_path', 'logo_dark_path', 'favicon_path',
+    ];
+
+    /**
+     * Registra qué atributos del tenant cambiaron. Se guarda en la BD del contexto actual: la central
+     * si lo edita un super admin, la del tenant si lo edita su Administrador.
+     *
+     * @param  array<string, mixed>  $before
+     */
+    public static function tenantSettingsChanged(Tenant $tenant, array $before, string $description): void
+    {
+        $old = [];
+        $new = [];
+
+        foreach (static::TENANT_SETTINGS as $attribute) {
+            if (($before[$attribute] ?? null) !== $tenant->{$attribute}) {
+                $old[$attribute] = $before[$attribute] ?? null;
+                $new[$attribute] = $tenant->{$attribute};
+            }
+        }
+
+        if ($new === []) {
+            return;
+        }
+
+        activity('tenant')
+            ->performedOn($tenant)
+            ->event('settings_updated')
+            ->withChanges(['old' => $old, 'attributes' => $new])
+            ->log($description);
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Admin\Resources\Tenants\Schemas;
 
+use App\Filament\Shared\Tenants\TenantSettingsFields;
 use App\Models\Tenant;
 use Closure;
 use Filament\Forms\Components\Repeater;
@@ -10,6 +11,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 
 class TenantForm
@@ -52,7 +54,12 @@ class TenantForm
                     ]),
 
                 Section::make('Dominios')
-                    ->description('Sin punto se usa como subdominio de localhost (acme → acme.localhost). Con punto es un dominio propio (acme.test) y debe apuntar al servidor (archivo hosts en local). Si no se carga ninguno, se usa el slug como subdominio.')
+                    ->description(new HtmlString(
+                        'Por dónde entra el tenant. Dos formas, se pueden combinar:<br>'
+                        .'• <strong>Subdominio</strong>: escribe solo el nombre, sin puntos. <code>acme</code> → <code>acme.'.e(config('tenancy.central_domains')[0]).'</code>. No requiere configuración extra.<br>'
+                        .'• <strong>Dominio propio</strong>: el dominio completo, con puntos. <code>acme.test</code> o <code>app.cliente.com</code>. Debe apuntar a este servidor (en local, una línea en el archivo hosts; en producción, un registro DNS).<br>'
+                        .'El primero de la lista es el <strong>principal</strong>: se usa en enlaces, correos y archivos. Si no cargas ninguno, se usa el slug como subdominio.'
+                    ))
                     ->components([
                         Repeater::make('domains')
                             ->hiddenLabel()
@@ -61,10 +68,20 @@ class TenantForm
                                 TextInput::make('domain')
                                     ->required()
                                     ->maxLength(255)
+                                    ->live(onBlur: true)
+                                    ->dehydrateStateUsing(fn (?string $state): string => strtolower(trim((string) $state)))
+                                    ->hint(fn (?string $state): ?string => filled($state) && ! static::isCentralSubdomain($state)
+                                        ? '→ '.Tenant::urlForHost(Tenant::hostFor(strtolower(trim($state))), 'app')
+                                        : null)
                                     ->regex('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/')
                                     ->validationMessages([
                                         'regex' => 'Dominio inválido: solo minúsculas, números, guiones y puntos.',
                                     ])
+                                    ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail): void {
+                                        if (static::isCentralSubdomain((string) $value)) {
+                                            $fail('Para un subdominio escribe solo el nombre, sin «.'.static::centralSuffix((string) $value).'».');
+                                        }
+                                    })
                                     ->notIn(config('tenancy.central_domains'))
                                     ->distinct()
                                     ->unique(ignoreRecord: true),
@@ -72,6 +89,10 @@ class TenantForm
                             ->defaultItems(0)
                             ->addActionLabel('Agregar dominio'),
                     ]),
+
+                TenantSettingsFields::contact(),
+
+                TenantSettingsFields::region(),
 
                 Section::make('Administrador del tenant')
                     ->description('Usuario con el que el tenant entra a su panel.')
@@ -101,5 +122,26 @@ class TenantForm
                             ->required(),
                     ]),
             ]);
+    }
+
+    /**
+     * "acme.localhost" escrito como dominio propio: en realidad es un subdominio del central.
+     */
+    private static function isCentralSubdomain(string $value): bool
+    {
+        return static::centralSuffix($value) !== null;
+    }
+
+    private static function centralSuffix(string $value): ?string
+    {
+        $value = strtolower(trim($value));
+
+        foreach (config('tenancy.central_domains') as $central) {
+            if (str_ends_with($value, '.'.$central)) {
+                return $central;
+            }
+        }
+
+        return null;
     }
 }

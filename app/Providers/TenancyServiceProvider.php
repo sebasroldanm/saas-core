@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Jobs\DeleteTenantStorage;
+use Filament\Support\Facades\FilamentTimezone;
 use Illuminate\Contracts\Http\Kernel;
 use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Event;
@@ -95,6 +96,10 @@ class TenancyServiceProvider extends ServiceProvider
                     $registrar->cacheKey = config('permission.cache.key').'.tenant.'.$event->tenancy->tenant->getTenantKey();
                     $registrar->clearPermissionsCollection();
                 },
+                // Fechas: la BD está en UTC; Filament muestra y recibe en la zona del tenant
+                function (Events\TenancyBootstrapped $event): void {
+                    FilamentTimezone::set($event->tenancy->tenant->effectiveTimezone());
+                },
                 // Logs y reportes de errores llevan el tenant (Context se propaga también a los jobs)
                 function (Events\TenancyBootstrapped $event): void {
                     Context::add('tenant', $event->tenancy->tenant->getTenantKey());
@@ -115,6 +120,7 @@ class TenancyServiceProvider extends ServiceProvider
                 },
                 function (): void {
                     Context::forget('tenant');
+                    FilamentTimezone::set(null);
                 },
                 function (): void {
                     if (static::$centralPublicDiskUrl !== null) {

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\TenantStatus;
+use Illuminate\Support\Facades\Storage;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDomains;
@@ -14,6 +15,13 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
  * @property string $id
  * @property string $name
  * @property TenantStatus $status
+ * @property ?string $contact_email
+ * @property ?string $contact_phone
+ * @property ?string $timezone
+ * @property ?string $primary_color
+ * @property ?string $logo_path
+ * @property ?string $logo_dark_path
+ * @property ?string $favicon_path
  */
 class Tenant extends BaseTenant implements TenantWithDatabase
 {
@@ -47,7 +55,11 @@ class Tenant extends BaseTenant implements TenantWithDatabase
      */
     public static function getCustomColumns(): array
     {
-        return ['id', 'name', 'status', 'status_changed_at', 'created_at', 'updated_at'];
+        return [
+            'id', 'name', 'status', 'status_changed_at', 'created_at', 'updated_at',
+            'contact_email', 'contact_phone', 'timezone',
+            'primary_color', 'logo_path', 'logo_dark_path', 'favicon_path',
+        ];
     }
 
     public function isActive(): bool
@@ -74,36 +86,75 @@ class Tenant extends BaseTenant implements TenantWithDatabase
     }
 
     /**
-     * Host del tenant: el primer dominio registrado. Si no tiene punto se trata como
-     * subdominio del dominio central (acme => acme.localhost).
+     * Host completo de un valor de la tabla `domains`: sin punto es un subdominio del dominio
+     * central principal (acme => acme.localhost); con punto es un dominio propio (acme.test).
      */
-    public function host(): ?string
+    public static function hostFor(string $domain): string
     {
-        $domain = $this->domains()->orderBy('id')->value('domain');
-
-        if (! $domain) {
-            return null;
-        }
-
         return str_contains($domain, '.')
             ? $domain
             : $domain.'.'.config('tenancy.central_domains')[0];
     }
 
     /**
-     * URL absoluta del tenant, reutilizando esquema y puerto de APP_URL.
+     * URL absoluta para un host, reutilizando esquema y puerto de APP_URL.
      */
-    public function url(string $path = '/'): ?string
+    public static function urlForHost(string $host, string $path = '/'): string
     {
-        $host = $this->host();
-
-        if (! $host) {
-            return null;
-        }
-
         $appUrl = parse_url(config('app.url'));
         $port = isset($appUrl['port']) ? ':'.$appUrl['port'] : '';
 
         return ($appUrl['scheme'] ?? 'http').'://'.$host.$port.'/'.ltrim($path, '/');
+    }
+
+    /**
+     * Host principal: el dominio registrado primero. Se usa en enlaces, correos y URLs de archivos.
+     */
+    public function host(): ?string
+    {
+        $domain = $this->domains()->orderBy('id')->value('domain');
+
+        return $domain ? static::hostFor($domain) : null;
+    }
+
+    public function url(string $path = '/'): ?string
+    {
+        $host = $this->host();
+
+        return $host ? static::urlForHost($host, $path) : null;
+    }
+
+    public function effectiveTimezone(): string
+    {
+        return $this->timezone ?: config('core.tenant.default_timezone');
+    }
+
+    public function effectivePrimaryColor(): string
+    {
+        return $this->primary_color ?: config('core.tenant.default_primary_color');
+    }
+
+    /**
+     * URL pública de un archivo de marca. Siempre por el dominio del tenant (/media), así funciona
+     * también desde el panel central.
+     */
+    public function brandingUrl(?string $path): ?string
+    {
+        return $path ? $this->url('media/'.$path) : null;
+    }
+
+    /**
+     * Archivos de marca reemplazados o quitados: se borran del disco `public` del tenant.
+     * Debe llamarse con la tenancy del propio tenant inicializada.
+     */
+    public function deleteReplacedBrandingFiles(array $previous): void
+    {
+        foreach (['logo_path', 'logo_dark_path', 'favicon_path'] as $attribute) {
+            $old = $previous[$attribute] ?? null;
+
+            if ($old && $old !== $this->{$attribute}) {
+                Storage::disk('public')->delete($old);
+            }
+        }
     }
 }

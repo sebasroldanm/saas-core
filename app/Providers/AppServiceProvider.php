@@ -8,6 +8,8 @@ use App\Models\User;
 use App\Notifications\ResetPasswordNotification;
 use App\Policies\ActivityPolicy;
 use Filament\Auth\Notifications\ResetPassword as FilamentResetPassword;
+use Filament\Support\Colors\Color;
+use Filament\Support\Facades\FilamentColor;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
@@ -54,6 +56,13 @@ class AppServiceProvider extends ServiceProvider
 
             return $user->isAdministrator() ? true : null;
         });
+
+        // Color primario del tenant. Función diferida: Filament la evalúa al dibujar el panel, con el tenant
+        // ya identificado (los ->colors() de un panel se evalúan al arrancarlo, que puede ser antes).
+        // Fuera de un tenant no aporta nada y rige el color de cada panel.
+        FilamentColor::register(fn (): array => tenancy()->initialized
+            ? ['primary' => Color::hex(tenant()->effectivePrimaryColor())]
+            : []);
 
         // Activity es un modelo de vendor: su policy no se descubre sola
         Gate::policy(Activity::class, ActivityPolicy::class);

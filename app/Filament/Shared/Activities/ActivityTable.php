@@ -5,11 +5,13 @@ namespace App\Filament\Shared\Activities;
 use App\Support\Audit;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\DatePicker;
+use Filament\Support\Facades\FilamentTimezone;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Spatie\Activitylog\Models\Activity;
 
 /**
@@ -58,9 +60,10 @@ class ActivityTable
                         DatePicker::make('from')->label('Desde'),
                         DatePicker::make('until')->label('Hasta'),
                     ])
+                    // Las fechas elegidas son días de la zona del panel (la del tenant); la BD está en UTC
                     ->query(fn (Builder $query, array $data): Builder => $query
-                        ->when($data['from'] ?? null, fn (Builder $q, string $date): Builder => $q->whereDate('created_at', '>=', $date))
-                        ->when($data['until'] ?? null, fn (Builder $q, string $date): Builder => $q->whereDate('created_at', '<=', $date))),
+                        ->when($data['from'] ?? null, fn (Builder $q, string $date): Builder => $q->where('created_at', '>=', Carbon::parse($date, FilamentTimezone::get())->startOfDay()->utc()))
+                        ->when($data['until'] ?? null, fn (Builder $q, string $date): Builder => $q->where('created_at', '<=', Carbon::parse($date, FilamentTimezone::get())->endOfDay()->utc()))),
             ])
             ->recordActions([
                 ViewAction::make(),

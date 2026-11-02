@@ -13,7 +13,6 @@ use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
-use Filament\Support\Colors\Color;
 use Filament\View\PanelsRenderHook;
 use Filament\Widgets\AccountWidget;
 use Filament\Widgets\FilamentInfoWidget;
@@ -33,7 +32,12 @@ class AppPanelProvider extends PanelProvider
         return $panel
             ->id('app')
             ->path('app')
+            // Marca por tenant ("Configuración" del panel): se evalúa en cada request, también en el login
             ->brandName(fn (): string => tenant('name') ?? 'core-saas')
+            ->brandLogo(fn (): ?string => tenant()?->brandingUrl(tenant()->logo_path))
+            ->darkModeBrandLogo(fn (): ?string => tenant()?->brandingUrl(tenant()->logo_dark_path ?: tenant()->logo_path))
+            ->brandLogoHeight('2.25rem')
+            ->favicon(fn (): ?string => tenant()?->brandingUrl(tenant()->favicon_path))
             ->login()
             // "¿Olvidaste tu contraseña?": envía el enlace por correo (en cola, ver contenedor queue)
             ->passwordReset()
@@ -48,9 +52,7 @@ class AppPanelProvider extends PanelProvider
                     ])->render()
                     : '',
             )
-            ->colors([
-                'primary' => Color::Amber,
-            ])
+            // Sin ->colors(): el color primario es el del tenant, registrado en AppServiceProvider
             ->discoverResources(in: app_path('Filament/App/Resources'), for: 'App\Filament\App\Resources')
             ->discoverPages(in: app_path('Filament/App/Pages'), for: 'App\Filament\App\Pages')
             ->pages([

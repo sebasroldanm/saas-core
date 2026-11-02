@@ -25,10 +25,8 @@ return [
      * Only relevant if you're using the domain or subdomain identification middleware.
      */
     // El primero se usa como base de los subdominios de tenants (acme => acme.localhost)
-    'central_domains' => [
-        'localhost',
-        '127.0.0.1',
-    ],
+    // En producción: CENTRAL_DOMAINS=midominio.com (los tenants quedan como acme.midominio.com)
+    'central_domains' => array_values(array_filter(array_map('trim', explode(',', env('CENTRAL_DOMAINS', 'localhost,127.0.0.1'))))),
 
     /**
      * Tenancy bootstrappers are executed when tenancy is initialized.

@@ -78,6 +78,9 @@ MAIL_FROM_NAME="${APP_NAME}"
 # VITE_PORT=5173
 # DB_ROOT_PASSWORD=root
 # TENANT_DB_PREFIX=tenant_
+# CENTRAL_DOMAINS=localhost,127.0.0.1    # dominio(s) del panel central; el primero es la base de los subdominios
+# TENANT_DEFAULT_TIMEZONE=UTC             # zona IANA para tenants sin zona propia (ej. America/Bogota)
+# TENANT_DEFAULT_PRIMARY_COLOR=#f59e0b    # color de tenants sin marca propia
 # DB_DATA_PATH=./docker/data/mysql
 # REDIS_DATA_PATH=./docker/data/redis
 ```

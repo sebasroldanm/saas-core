@@ -25,7 +25,7 @@ return [
         'show_model_path' => false,
         'cluster' => null,
         'tabs' => [
-            'pages' => false,
+            'pages' => true, // Configuración del tenant (View:TenantSettings)
             'widgets' => false,
             'resources' => true,
             'custom_permissions' => false,
