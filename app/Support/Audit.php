@@ -37,6 +37,8 @@ class Audit
         'logout' => 'Cierre de sesión',
         'impersonated' => 'Acceso desde panel central',
         'impersonation_ended' => 'Fin del acceso desde panel central',
+        'admin_password_reset' => 'Restablecimiento por super admin',
+        'password_reset' => 'Contraseña restablecida',
         'roles_changed' => 'Roles modificados',
         'permissions_changed' => 'Permisos modificados',
     ];

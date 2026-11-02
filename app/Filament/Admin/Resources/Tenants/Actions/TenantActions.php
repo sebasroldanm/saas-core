@@ -6,9 +6,16 @@ use App\Enums\TenantStatus;
 use App\Filament\Admin\Resources\Tenants\TenantResource;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\TenantAdminAccess;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Radio;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 
 /**
  * Acciones de ciclo de vida del tenant, compartidas por la tabla y la página de edición.
@@ -23,6 +30,7 @@ class TenantActions
         return [
             static::impersonate(),
             static::open(),
+            static::resetAdminPassword(),
             static::suspend(),
             static::reactivate(),
             static::delete(),
@@ -75,6 +83,91 @@ class TenantActions
             ->color('gray')
             ->visible(fn (Tenant $record): bool => $record->isActive())
             ->url(fn (Tenant $record): ?string => $record->url('app'), shouldOpenInNewTab: true);
+    }
+
+    /**
+     * Restablece el acceso de un Administrador del tenant: por enlace al email (recomendado,
+     * el super admin no conoce la contraseña) o definiendo una contraseña nueva.
+     */
+    public static function resetAdminPassword(): Action
+    {
+        return Action::make('resetAdminPassword')
+            ->label('Restablecer contraseña del admin')
+            ->icon(Heroicon::OutlinedKey)
+            ->color('gray')
+            ->visible(fn (Tenant $record): bool => $record->isActive())
+            ->modalHeading('Restablecer contraseña del administrador')
+            ->modalDescription('La contraseña nunca se guarda en el panel central.')
+            ->modalSubmitActionLabel('Restablecer')
+            ->schema(fn (Tenant $record): array => [
+                Select::make('user_id')
+                    ->label('Administrador')
+                    ->options(TenantAdminAccess::administrators($record))
+                    ->default(array_key_first(TenantAdminAccess::administrators($record)))
+                    ->required(),
+                Radio::make('mode')
+                    ->label('Cómo')
+                    ->options([
+                        TenantAdminAccess::MODE_LINK => 'Enviar enlace por email (recomendado)',
+                        TenantAdminAccess::MODE_MANUAL => 'Definir una contraseña ahora',
+                    ])
+                    ->descriptions([
+                        TenantAdminAccess::MODE_LINK => 'El administrador elige su contraseña desde el enlace. Vence en '.config('auth.passwords.users.expire').' minutos.',
+                        TenantAdminAccess::MODE_MANUAL => 'Comunícasela por un canal seguro. Se le avisa por email y se cierran sus otras sesiones.',
+                    ])
+                    ->default(TenantAdminAccess::MODE_LINK)
+                    ->required()
+                    ->live(),
+                TextInput::make('password')
+                    ->label('Nueva contraseña')
+                    ->password()
+                    ->revealable()
+                    ->rule(PasswordRule::default())
+                    ->minLength(8)
+                    ->confirmed()
+                    ->required(fn (Get $get): bool => $get('mode') === TenantAdminAccess::MODE_MANUAL)
+                    ->visible(fn (Get $get): bool => $get('mode') === TenantAdminAccess::MODE_MANUAL),
+                TextInput::make('password_confirmation')
+                    ->label('Confirmar contraseña')
+                    ->password()
+                    ->revealable()
+                    ->required(fn (Get $get): bool => $get('mode') === TenantAdminAccess::MODE_MANUAL)
+                    ->visible(fn (Get $get): bool => $get('mode') === TenantAdminAccess::MODE_MANUAL),
+            ])
+            ->action(function (Tenant $record, array $data, Action $action): void {
+                $admin = auth('admin')->user();
+                $userId = (int) $data['user_id'];
+                $email = $record->run(fn (): ?string => User::role(User::ADMIN_ROLE)->whereKey($userId)->value('email'));
+
+                // Solo administradores del tenant (el select podría manipularse)
+                abort_unless($email, 403);
+
+                if ($data['mode'] === TenantAdminAccess::MODE_MANUAL) {
+                    TenantAdminAccess::setPassword($record, $userId, $data['password'], $admin);
+                    Notification::make()->title('Contraseña actualizada')->body("Se avisó por email a {$email}.")->success()->send();
+                } else {
+                    $status = TenantAdminAccess::sendResetLink($record, $userId, $admin);
+
+                    if ($status !== Password::RESET_LINK_SENT) {
+                        Notification::make()
+                            ->title('No se envió el enlace')
+                            ->body($status === Password::RESET_THROTTLED ? 'Ya se envió uno hace menos de un minuto.' : __($status))
+                            ->danger()
+                            ->send();
+                        $action->halt();
+                    }
+
+                    Notification::make()->title('Enlace enviado')->body("Se envió a {$email}.")->success()->send();
+                }
+
+                activity('tenant')
+                    ->performedOn($record)
+                    ->event('admin_password_reset')
+                    ->withProperties(['user_email' => $email, 'mode' => $data['mode']])
+                    ->log($data['mode'] === TenantAdminAccess::MODE_MANUAL
+                        ? 'Contraseña de un administrador del tenant definida'
+                        : 'Enlace de restablecimiento enviado a un administrador del tenant');
+            });
     }
 
     public static function suspend(): Action

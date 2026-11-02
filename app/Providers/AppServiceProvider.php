@@ -5,10 +5,13 @@ namespace App\Providers;
 use App\Http\Controllers\ImpersonationController;
 use App\Models\Admin;
 use App\Models\User;
+use App\Notifications\ResetPasswordNotification;
 use App\Policies\ActivityPolicy;
+use Filament\Auth\Notifications\ResetPassword as FilamentResetPassword;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Logout;
+use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
@@ -26,7 +29,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Correo de restablecimiento en español y con el nombre del tenant (Filament lo resuelve del contenedor)
+        $this->app->bind(FilamentResetPassword::class, ResetPasswordNotification::class);
     }
 
     /**
@@ -115,6 +119,18 @@ class AppServiceProvider extends ServiceProvider
                 ->event('logout')
                 ->withProperties(['guard' => $event->guard, 'ip' => request()->ip()])
                 ->log('Cierre de sesión');
+        });
+
+        // El usuario completó el restablecimiento desde el enlace del correo
+        Event::listen(function (PasswordReset $event): void {
+            if ($event->user instanceof Model) {
+                activity('auth')
+                    ->causedBy($event->user)
+                    ->performedOn($event->user)
+                    ->event('password_reset')
+                    ->withProperties(['ip' => request()->ip()])
+                    ->log('Contraseña restablecida por el usuario');
+            }
         });
 
         Event::listen(function (Failed $event): void {

@@ -39,6 +39,7 @@ class EditTenant extends EditRecord
             TenantActions::impersonate(),
             ActionGroup::make([
                 TenantActions::open(),
+                TenantActions::resetAdminPassword(),
                 TenantActions::suspend(),
                 TenantActions::reactivate(),
                 TenantActions::delete(),

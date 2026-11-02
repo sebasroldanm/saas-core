@@ -82,6 +82,21 @@ services:
     networks:
       - core-saas-network
 
+  # Procesa las colas (Redis): correos, notificaciones y jobs. Misma imagen que backend.
+  # queue:listen recarga el código en cada job (cómodo en desarrollo; en producción usar queue:work)
+  queue:
+    image: core-saas-backend
+    container_name: core-saas-queue
+    restart: unless-stopped
+    working_dir: /var/www/html
+    command: ["php", "artisan", "queue:listen", "--tries=3", "--timeout=90"]
+    volumes:
+      - ./:/var/www/html
+    depends_on:
+      - backend
+    networks:
+      - core-saas-network
+
   node:
     image: node:26-alpine
     container_name: core-saas-node

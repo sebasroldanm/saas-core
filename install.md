@@ -61,6 +61,16 @@ REDIS_HOST=core-saas-redis
 REDIS_PASSWORD=null
 REDIS_PORT=6379
 
+# Correo (Mailtrap en desarrollo: Email Testing → Inbox → SMTP Settings)
+MAIL_MAILER=smtp
+MAIL_HOST=sandbox.smtp.mailtrap.io
+MAIL_PORT=2525
+MAIL_USERNAME=tu_usuario_mailtrap
+MAIL_PASSWORD=tu_password_mailtrap
+MAIL_FROM_ADDRESS=no-reply@core-saas.test
+MAIL_FROM_NAME="${APP_NAME}"
+# Sin cuenta de Mailtrap: MAIL_MAILER=log (los correos quedan en storage/logs/laravel.log)
+
 # Opcionales (valores por defecto entre paréntesis)
 # APP_PORT=8080
 # DB_FORWARD_PORT=33061
@@ -87,7 +97,7 @@ GID=1001
 docker compose up -d --build
 ```
 
-Se crean 5 contenedores:
+Se crean 6 contenedores:
 
 | Contenedor | Qué es |
 |---|---|
@@ -96,6 +106,7 @@ Se crean 5 contenedores:
 | `core-saas-db` | MySQL 9.7 |
 | `core-saas-redis` | Redis 8.10 (cache, sesiones y colas) |
 | `core-saas-node` | Node 26: instala dependencias npm y corre Vite |
+| `core-saas-queue` | Procesa las colas (envío de correos y notificaciones) |
 
 En el primer arranque MySQL inicializa `docker/data/mysql` y ejecuta [docker/mysql/init/01-tenant-grants.sh](docker/mysql/init/01-tenant-grants.sh), que:
 
@@ -151,6 +162,7 @@ Si todo lo anterior funciona, la instalación está completa. El tenant de prueb
 |---|---|
 | `docker: command not found` en WSL | Falta la integración de Docker Desktop con la distro: **Settings → Resources → WSL Integration**. |
 | `port is already allocated` al levantar | Otro proceso usa el puerto. Cambiar `APP_PORT`, `DB_FORWARD_PORT`, `REDIS_FORWARD_PORT` o `VITE_PORT` en `.env` y repetir `docker compose up -d`. |
+| Los correos no llegan | Ver `docker compose logs queue`: si no aparece el job, el contenedor `queue` no está corriendo; si aparece `FAIL`, revisar `MAIL_*` en `.env` y reintentar con `php artisan queue:retry all`. Tras cambiar el `.env`: `docker compose restart queue`. |
 | La app devuelve 500 con `No application encryption key` | Falta el paso `php artisan key:generate`. |
 | Al crear un tenant: `Access denied ... to database 'tenant_...'` | La carpeta `docker/data/mysql` ya existía de antes y el script de permisos no corrió. Ejecutarlo a mano: `docker compose exec db sh /docker-entrypoint-initdb.d/01-tenant-grants.sh` |
 | Los tests fallan con `Los tests deben correr contra una BD *_testing` | Hay variables `DB_*` definidas en el entorno del contenedor que pisan las de `phpunit.xml`. No agregar `DB_*`, `CACHE_*` ni `SESSION_*` en `environment:` de `docker-compose.yml`. |

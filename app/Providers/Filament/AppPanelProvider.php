@@ -35,6 +35,8 @@ class AppPanelProvider extends PanelProvider
             ->path('app')
             ->brandName(fn (): string => tenant('name') ?? 'core-saas')
             ->login()
+            // "¿Olvidaste tu contraseña?": envía el enlace por correo (en cola, ver contenedor queue)
+            ->passwordReset()
             ->profile(EditProfile::class, isSimple: false)
             ->authGuard('web')
             // Barra fija mientras un super admin está dentro del tenant ("Entrar como admin")
